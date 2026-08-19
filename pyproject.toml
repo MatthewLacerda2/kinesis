@@ -1,0 +1,29 @@
+[project]
+name = "kinesis"
+version = "0.1.0"
+description = "PureRef-style reference board driven by webcam hand tracking"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "PySide6>=6.7",
+    # Pinned: mediapipe 1.0.x aborts on macOS/arm64 at HandLandmarker init --
+    # TensorsToDetectionsCalculator::Open() requires a Metal graph service that
+    # the wheel never registers ("Check failed: service_ Service is unavailable").
+    # Setting delegate=CPU does not avoid it. 0.10.35 is the newest working build.
+    "mediapipe==0.10.35",
+    # <5: mediapipe 0.10.x is built against the cv2 4.x line.
+    "opencv-python>=4.10,<5",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["kinesis*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

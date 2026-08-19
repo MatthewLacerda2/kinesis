@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+
+# Local tool state (the checked-in .mcp.json is the shared part)
+.claude/settings.local.json
+
+# Saved boards are personal, not project files
+*.kinesis
+
+# Throwaway working notes
+auxmd.md
