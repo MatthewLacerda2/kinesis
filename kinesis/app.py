@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         self.camera_bg = CameraFeed(self)
         self.camera_bg.frame_ready.connect(self._on_camera_frame)
         self.camera_bg.failed.connect(self._on_camera_failed)
+        self.camera_bg.warning.connect(self._on_camera_warning)
         self.view.camera_button_clicked.connect(self.toggle_background)
 
         self.tuning_panel = TuningPanel(self.tuning, self)
@@ -141,6 +142,10 @@ class MainWindow(QMainWindow):
     def _on_camera_frame(self) -> None:
         self.view.set_background_image(self.camera_bg.latest())
 
+    def _on_camera_warning(self, message: str) -> None:
+        """Feed is up but not as asked — say so, don't interrupt."""
+        self.statusBar().showMessage(message, 8000)
+
     def _on_camera_failed(self, message: str) -> None:
         self._sync_background_state()
         self.statusBar().showMessage(message, 0)
@@ -173,6 +178,9 @@ class MainWindow(QMainWindow):
         if state == "error":
             self.statusBar().showMessage(message, 0)
             QMessageBox.warning(self, "Hand tracking", message)
+        elif state == "warning":
+            # Tracking is still running; a modal here would be worse than useless.
+            self.statusBar().showMessage(message, 8000)
         elif state == "running":
             self.statusBar().showMessage("Hand tracking on — pinch to grab an image.", 4000)
         elif state == "stopped":
