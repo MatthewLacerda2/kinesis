@@ -161,7 +161,7 @@ def test_two_hands_on_empty_canvas_zoom_the_view(rig):
     b = canvas_xy(view, QPointF(100, 0))
     hc.latest = frame(("Right", *a, True), ("Left", *b, True))
     hc._tick()
-    assert hc._canvas_gesture is not None
+    assert hc.canvas_gesture.active
     assert not hc._grabs
 
     settle(hc, frame(("Right", 0.1, 0.5, True), ("Left", 0.9, 0.5, True)))

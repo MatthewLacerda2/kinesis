@@ -154,9 +154,11 @@ up front so setup fails loudly rather than mid-capture. `kinesis/canvas/` —
 `view.py` (mouse/keyboard interaction), `chrome.py` (all canvas painting --
 trash target, camera button, toolbar, cursors, HUD), `persistence.py`
 (`.kinesis` save/load). `kinesis/ui/` — `hand_control.py`
-(tracker lifetime, the 60 Hz timer, the grab state machine), `overlay.py`
-(preview/cursors/HUD), `tuning.py` (the `T` panel), `camera_feed.py` (background
-capture). `kinesis/app.py` is the window and the wiring; `kinesis/control.py` is
+(tracker lifetime, the 60 Hz timer, the grab state machine),
+`canvas_gesture.py` (two fists on empty canvas pan and zoom the view -- the one
+hand gesture that touches no item, which is why it is not in the state
+machine), `overlay.py` (preview/cursors/HUD), `tuning.py` (the `T` panel),
+`camera_feed.py` (background capture). `kinesis/app.py` is the window and the wiring; `kinesis/control.py` is
 the control channel; `kinesis/mcp_server.py` is a thin client of it.
 
 **The dependency direction that must not invert:** `tracking/` never imports
