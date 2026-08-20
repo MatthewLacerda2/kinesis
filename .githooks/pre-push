@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Refuses a push whose gates are not green.
+#
+# Versioned here rather than in .git/hooks/ because that directory is not
+# tracked, and a hook nobody installs is not a guardrail. `./run.sh setup`
+# points core.hooksPath at this directory, so one setup arms every push.
+#
+# It runs the same `./run.sh check` that CI runs -- the point is that a green
+# local run means a green CI run rather than approximately one.
+#
+# `git push --no-verify` skips this, deliberately: pushing a knowingly broken
+# branch to hand work over mid-session is legitimate, and the draft-PR flow
+# exists for exactly that. This stops the *accidental* broken push.
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root"
+
+log=$(mktemp -t kinesis-pre-push)
+trap 'rm -f "$log"' EXIT
+
+echo "[pre-push] running ./run.sh check (skip with --no-verify)"
+./run.sh check 2>&1 | tee "$log"
+status=${PIPESTATUS[0]}
+
+if [ "$status" -eq 0 ]; then
+  exit 0
+fi
+
+# `check` prints one "FAILED: <gate>" line per gate that failed; echo them back
+# at the bottom so the reason survives the scrollback of a full test run. A hook
+# that refuses without saying why trains people to reach for --no-verify, which
+# is worse than having no hook.
+echo
+echo "[pre-push] push refused -- gates are not green." >&2
+if grep -q '^\[check\] FAILED: ' "$log"; then
+  sed -n 's/^\[check\] FAILED: /  failed gate: /p' "$log" >&2
+else
+  echo "  ./run.sh check exited $status without naming a gate (setup or the" >&2
+  echo "  runner itself failed) -- the full output is above." >&2
+fi
+echo >&2
+echo "  reproduce:  cd $root && ./run.sh check" >&2
+echo "  override:   git push --no-verify   (for a deliberate hand-off)" >&2
+exit 1

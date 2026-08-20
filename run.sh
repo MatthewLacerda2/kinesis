@@ -8,6 +8,17 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Arm the versioned pre-push hook. core.hooksPath is local config, so it cannot
+# be checked in -- setup is the only place it can happen. Silent when it is
+# already right: this runs on every ./run.sh invocation, and a line of output
+# every launch is noise nobody reads. The value is shared by every worktree of
+# the clone, and resolves relative to whichever worktree the push runs in.
+if [ -d .githooks ] && git rev-parse --git-dir >/dev/null 2>&1 \
+   && [ "$(git config --get core.hooksPath || true)" != ".githooks" ]; then
+  git config core.hooksPath .githooks
+  echo "[kinesis] pre-push hook armed (core.hooksPath=.githooks)."
+fi
+
 PY=.venv/bin/python
 STAMP=.venv/.deps-installed
 
