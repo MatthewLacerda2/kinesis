@@ -204,11 +204,17 @@ remembers.
      simply be finished" is an acceptable answer here.
   3. **Craft.** It follows Python good practices and the decided architecture
      above. If it doesn't, say so and propose the right shape.
-- **Flow:** idea → issue → branch → PR → merge. New work starts as an issue, not
-  a surprise diff, and the PR references the issue it closes. **Issue-less PRs
-  are allowed only** for documentation updates or bug fixes; everything else
-  starts as an issue. Either way the PR description still has to clear the three
-  gates.
+- **Flow:** idea → issue → branch → PR → merge, and **the issue step is
+  optional**. An issue is how a piece of work survives being planned in one
+  session and done in another, and it is what lets something run unattended —
+  that is its whole job, and when neither applies it is paperwork. **Issue-less
+  PRs are allowed for anything**, not just docs and bug fixes: the user works by
+  winging changes as they occur to him, and on a project this size that
+  flexibility is worth more than a paper trail written for a reader who is
+  standing right there. Don't ask for an issue to be filed first, and don't file
+  one just to have something to close. A PR that *does* close an issue still
+  references it. Either way the PR description still has to clear the three
+  gates — skipping the issue skips the paperwork, not the thinking.
 - **Pull requests — open early, draft until ready.** The moment a branch has its
   first commit, open a PR for it — as a **draft**. Draft while in progress or
   blocked (say why in the description); **ready for review** once done and
@@ -336,11 +342,14 @@ remembers.
 
 ## Issues, labels & priority
 
-- **Issues come before PRs.** The unit of work is a well-specified issue: the
-  **what**, **why it belongs in the project**, and the **roadmap — not the
-  implementation intrinsics**. A future Claude reads it cold and says *"I
-  understand the assignment, I know how to proceed."* That is what lets an issue
-  run unattended.
+- **When there is an issue, it comes before the PR** — but see the flow rule
+  above: plenty of work arrives as a PR and nothing is wrong with that. What an
+  issue is *for* is work that has to survive the session it was thought up in.
+  The unit of work is then a well-specified issue: the **what**, **why it
+  belongs in the project**, and the **roadmap — not the implementation
+  intrinsics**. A future Claude reads it cold and says *"I understand the
+  assignment, I know how to proceed."* That is what lets an issue run
+  unattended.
 - **File what you notice.** Claude may open an issue autonomously — for anything
   that will be a recurring theme or problem, or when it realises a tool would be
   useful more than once. Only things whose benefit outweighs the cost of
