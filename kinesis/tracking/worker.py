@@ -154,7 +154,7 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
     from mediapipe.tasks import python as mp_python
     from mediapipe.tasks.python import vision
 
-    from .gestures import GestureEngine
+    from .gestures import Detection, GestureEngine
 
     engine = GestureEngine(tuning)
 
@@ -283,11 +283,17 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
                 else:
                     result = landmarker.detect_for_video(image, int(t_capture * 1000))
 
+                # Both landmark sets, from the one result: the normalized 2D
+                # ones place the cursor, the metric world ones decide the
+                # pinch. Neither crosses the queue -- only the decided Hand does.
                 detections = []
-                for lm, handed in zip(result.hand_landmarks, result.handedness):
-                    detections.append((
-                        handed[0].category_name,
-                        [(p.x, p.y) for p in lm],
+                for lm, world, handed in zip(result.hand_landmarks,
+                                             result.hand_world_landmarks,
+                                             result.handedness):
+                    detections.append(Detection(
+                        handedness=handed[0].category_name,
+                        landmarks=[(p.x, p.y) for p in lm],
+                        world=[(p.x, p.y, p.z) for p in world],
                     ))
 
                 hands = engine.update(detections, t_capture,

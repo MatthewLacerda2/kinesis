@@ -1,12 +1,24 @@
 """Pinch detection and per-hand state. Pure: landmarks in, Hand states out.
 
 No camera, no Qt, no MediaPipe imports -- everything here is driven by plain
-sequences of (label, landmarks) so it can be tested with synthetic input.
+sequences of landmarks so it can be tested with synthetic input.
+
+Two coordinate spaces arrive per hand and they are not interchangeable. The
+normalized 2D landmarks are a projection: they are what the cursor and the
+preview skeleton need, and they are the wrong place to decide a pinch. Turn the
+hand toward the lens and the palm foreshortens while the fingertip gap, lying
+across it, does not -- so a ratio of the two climbs without bound while the
+gesture is unchanged, and the pinch becomes impossible to make (#32). The same
+projection is normalized per axis over a 4:3 frame, which quietly makes a
+vertical gap count 1.33x a horizontal one. The metric 3D world landmarks have
+neither problem, because distance in metres is invariant to rotation and metric
+space is isotropic, so every pinch decision here reads those.
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from .filters import OneEuroFilter, Vec2Filter
 from .protocol import Hand, Tuning
@@ -18,21 +30,45 @@ WRIST = 0
 MIDDLE_MCP = 9
 
 Landmarks = list[tuple[float, float]]
+Landmarks3D = list[tuple[float, float, float]]
 
 
-def pinch_ratio(landmarks: Landmarks) -> tuple[float, float]:
-    """Return (ratio, hand_scale).
+@dataclass(frozen=True)
+class Detection:
+    """One hand as the camera saw it, in both spaces, named so they can't swap.
 
-    ratio = |thumb_tip - index_tip| / |wrist - middle_mcp|
+    Both come out of the same MediaPipe result and never leave the tracker
+    process: the queue still carries only the decided `Hand`.
+    """
+
+    handedness: str          # "Left" | "Right"
+    landmarks: Landmarks     # normalized 0..1 in mirrored frame space
+    world: Landmarks3D       # metres, origin near the centre of the hand
+
+
+def pinch_ratio(world: Landmarks3D) -> float:
+    """Fingertip gap over palm length, both metric.
+
+        ratio = |thumb_tip - index_tip| / |wrist - middle_mcp|
 
     Dividing by hand size is what makes the pinch work at any distance from the
-    camera: both distances shrink together as the hand moves away.
+    camera and at any size of hand: both lengths are properties of the same
+    hand. Taken in metres it also holds at any orientation -- the two distances
+    are 3D, so neither foreshortens when the hand turns.
     """
-    d = math.dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP])
-    scale = math.dist(landmarks[WRIST], landmarks[MIDDLE_MCP])
-    if scale <= 1e-6:
-        return 999.0, 0.0
-    return d / scale, scale
+    palm = math.dist(world[WRIST], world[MIDDLE_MCP])
+    if palm <= 1e-6:
+        return 999.0
+    return math.dist(world[THUMB_TIP], world[INDEX_TIP]) / palm
+
+
+def hand_scale(landmarks: Landmarks) -> float:
+    """Projected palm length: it shrinks with distance, so it proxies depth.
+
+    Deliberately the 2D one. The metric palm length is the same number however
+    far away the hand is, which is exactly what makes it useless here.
+    """
+    return math.dist(landmarks[WRIST], landmarks[MIDDLE_MCP])
 
 
 def pinch_point(landmarks: Landmarks) -> tuple[float, float]:
@@ -96,30 +132,30 @@ class GestureEngine:
     def reset(self) -> None:
         self._states.clear()
 
-    def update(self, detections: list[tuple[str, Landmarks]], t: float,
+    def update(self, detections: list[Detection], t: float,
                include_landmarks: bool = False) -> list[Hand]:
         """Advance one frame.
 
-        detections: (handedness_label, landmarks) with landmarks already in
-        mirrored frame space, normalized 0..1.
+        detections: one per hand, 2D landmarks already in mirrored frame space
+        and normalized 0..1, world landmarks in metres.
         t: capture time in seconds (real elapsed time drives the filters).
         """
         tuning = self.tuning
         seen: set[str] = set()
         hands: list[Hand] = []
 
-        for label, landmarks in detections:
-            if label in seen:
+        for det in detections:
+            if det.handedness in seen:
                 continue  # MediaPipe occasionally reports two of the same label
-            seen.add(label)
+            seen.add(det.handedness)
 
-            state = self._states.get(label)
+            state = self._states.get(det.handedness)
             if state is None:
-                state = self._states[label] = HandFilterState(tuning)
+                state = self._states[det.handedness] = HandFilterState(tuning)
 
-            ratio, raw_scale = pinch_ratio(landmarks)
-            smooth_xy = state.point(pinch_point(landmarks), t)
-            smooth_scale = state.scale(raw_scale, t)
+            ratio = pinch_ratio(det.world)
+            smooth_xy = state.point(pinch_point(det.landmarks), t)
+            smooth_scale = state.scale(hand_scale(det.landmarks), t)
 
             # Schmitt trigger. A single threshold flickers around the boundary
             # and makes you drop images constantly.
@@ -129,13 +165,13 @@ class GestureEngine:
                 state.pinching = ratio < tuning.pinch_close
 
             hands.append(Hand(
-                handedness=label,
+                handedness=det.handedness,
                 pinch_xy=map_to_canvas(smooth_xy, tuning),
                 raw_xy=smooth_xy,
                 pinch_ratio=ratio,
                 pinching=state.pinching,
                 hand_scale=smooth_scale,
-                landmarks=list(landmarks) if include_landmarks else None,
+                landmarks=list(det.landmarks) if include_landmarks else None,
             ))
 
         # A hand that left the frame must not keep a stale latched pinch; its

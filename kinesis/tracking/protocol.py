@@ -14,9 +14,9 @@ class Hand:
     handedness: str                      # "Left" | "Right"
     pinch_xy: tuple[float, float]        # smoothed, mapped to canvas 0..1, already mirrored
     raw_xy: tuple[float, float]          # smoothed, still in frame space (for the preview)
-    pinch_ratio: float                   # raw normalized pinch distance, for the tuning UI
+    pinch_ratio: float                   # metric fingertip gap / palm length, for the tuning UI
     pinching: bool                       # post-hysteresis
-    hand_scale: float                    # wrist->middle-MCP distance, proxy for depth
+    hand_scale: float                    # projected wrist->middle-MCP distance, proxy for depth
     landmarks: list[tuple[float, float]] | None = None   # only when preview enabled
 
 
@@ -44,11 +44,22 @@ class TrackerStatus:
 class Tuning:
     """Every live-tunable number. Nothing here may be hardcoded elsewhere."""
 
-    # Tightened 52% overall from the 0.30/0.45 starting point (40%, then a
-    # further 20%). The band keeps its 1.5x ratio, so the Schmitt trigger stays
-    # exactly as resistant to flicker as it was at the wider setting.
-    pinch_close: float = 0.144
-    pinch_open: float = 0.216
+    # The ratio these gate is now metric (#32), so the old 0.144/0.216 -- fitted
+    # by hand to the projected ratio -- cannot carry over: the same gesture
+    # reads higher in metres, and reusing them would make every pinch
+    # impossible. Derived instead, two ways that agree. (1) Equivalence: a real
+    # detected hand measures 94 mm wrist->middle-MCP, and in the pose the old
+    # setting was tuned in -- hand side-on, fingers closing horizontally -- an
+    # 18 mm gap projects to 0.138, so 0.144 was firing at a gap of 18.8 mm,
+    # which is 0.199 in metres. (2) Physically: the thumb and index landmarks
+    # sit at the centres of the fingertips, so finger pads touching is a gap of
+    # about 18 mm, and 18/94 = 0.19. Rounded up to 0.20 rather than down,
+    # because a slightly loose trigger costs an early grab you can see and
+    # undo, while a slightly tight one is the bug this replaced. The band keeps
+    # its 1.5x ratio, so the Schmitt trigger stays exactly as resistant to
+    # flicker as before.
+    pinch_close: float = 0.20
+    pinch_open: float = 0.30
 
     # Lag control. cutoff = min_cutoff + beta*|velocity|: min_cutoff sets how
     # much smoothing survives when the hand is still, beta how fast that
