@@ -84,6 +84,8 @@ class BoardView(QGraphicsView):
     # ---------- selection geometry ----------
 
     def selected_items(self) -> list[ImageItem]:
+        """Selected images. Selected non-image items are excluded on purpose:
+        every caller here (Alt+drag scale, delete, z-order) is an image op."""
         return [i for i in self.board.selectedItems() if isinstance(i, ImageItem)]
 
     def _selection_rect(self) -> QRectF:
@@ -394,7 +396,7 @@ class BoardView(QGraphicsView):
             rect = self._marquee.normalized() if self._marquee else QRect()
             if rect.width() > 3 and rect.height() > 3:
                 scene_rect = self.mapToScene(rect).boundingRect()
-                for item in self.board.image_items():
+                for item in self.board.board_items():
                     if item.sceneBoundingRect().intersects(scene_rect):
                         item.setSelected(True)
             self._marquee_origin = None

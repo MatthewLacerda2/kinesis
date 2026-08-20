@@ -131,9 +131,16 @@ class ControlServer(QObject):
         return {"removed": removed}
 
     def cmd_clear_board(self, _request: dict) -> dict:
+        """Empty the board: every item on it, not only the images."""
         return {"removed": self.board.clear_board()}
 
     def cmd_list_images(self, _request: dict) -> dict:
+        """The images on the board, with id, path, position, scale and size.
+
+        Today every board item is an image, so this is also the whole board. When
+        that stops being true this listing goes board-wide (issue #3): a caller
+        has to be able to see everything cmd_clear_board would remove.
+        """
         images = []
         for item in self.board.image_items():
             w, h = item.natural_size()

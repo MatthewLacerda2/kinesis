@@ -219,6 +219,8 @@ class HandControl(QObject):
                 return
 
         held = {item for item, _ in self._grabs.values()}
+        # Images only: a pinch moves and scales a picture. What a hand does to a
+        # non-image item is that item's question to answer, not this loop's.
         for item in sorted(self.board.image_items(), key=lambda i: -i.zValue()):
             if item in held:
                 continue
