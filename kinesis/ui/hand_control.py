@@ -50,7 +50,10 @@ class HandControl(QObject):
 
         self.cursors: dict[str, Cursor] = {}
         self.latest: HandFrame | None = None
-        self.last_hand_time = 0.0
+        # Per hand label, not one clock for all hands: a single clock refreshed
+        # by any visible hand never expires while one hand stays, so a hand that
+        # left the frame kept its grab and went on scaling as a ghost (#33).
+        self.last_seen: dict[str, float] = {}
         self.latency_ms = 0.0
         self.fps = 0.0
 
@@ -93,6 +96,7 @@ class HandControl(QObject):
                 self.proc.terminate()
         self.proc = self.frames_q = self.control_q = None
         self.cursors.clear()
+        self.last_seen.clear()
         self.latest = None
         self.view.chrome.clear_hand_overlay()
         self.status_changed.emit("stopped", "hand tracking off")
@@ -129,6 +133,16 @@ class HandControl(QObject):
             if isinstance(msg, HandFrame):
                 self.latest = msg
 
+    def _lost(self, label: str, now: float) -> bool:
+        """Has this hand been gone longer than the hold window?"""
+        last = self.last_seen.get(label, 0.0)
+        return (now - last) * 1000.0 > self.tuning.lost_hold_ms
+
+    def _all_lost(self, now: float) -> bool:
+        """Same question for every hand at once: has the most recent one expired?"""
+        last = max(self.last_seen.values(), default=0.0)
+        return (now - last) * 1000.0 > self.tuning.lost_hold_ms
+
     def _tick(self) -> None:
         self._drain()
         frame = self.latest
@@ -140,10 +154,10 @@ class HandControl(QObject):
 
         self.fps = frame.fps
         self.latency_ms = (now - frame.t) * 1000.0
-        if frame.hands:
-            self.last_hand_time = now
 
         seen = {h.handedness for h in frame.hands}
+        for label in seen:
+            self.last_seen[label] = now
         viewport = self.view.viewport().rect()
         alpha = max(0.05, min(1.0, self.tuning.lerp_alpha))
 
@@ -169,14 +183,14 @@ class HandControl(QObject):
                 self._end_grab(cursor)
 
         # Hands that vanished: hold briefly before releasing, so a dropped
-        # detection doesn't fling images around.
-        if not frame.hands and self._grabs:
-            if (now - self.last_hand_time) * 1000.0 > self.tuning.lost_hold_ms:
-                self._release_all()
+        # detection doesn't fling images around. Each hand runs down its own
+        # hold window, so one hand staying in frame can no longer keep the
+        # other's grab -- and its half of a two-hand scale -- alive forever.
+        if not frame.hands and self._grabs and self._all_lost(now):
+            self._release_all()
         for label in list(self.cursors):
-            if label not in seen and label in self._grabs:
-                if (now - self.last_hand_time) * 1000.0 > self.tuning.lost_hold_ms:
-                    self._end_grab(self.cursors[label])
+            if label not in seen and label in self._grabs and self._lost(label, now):
+                self._end_grab(self.cursors[label], opened=False)
 
         self._sync_two_hand()
         self._apply_grabs()
@@ -240,11 +254,17 @@ class HandControl(QObject):
         if others and not self._grabs:
             self._begin_canvas_gesture(others[0], cursor)
 
-    def _end_grab(self, cursor: Cursor) -> None:
+    def _end_grab(self, cursor: Cursor, opened: bool = True) -> None:
+        """End a grab. `opened` is False when the hand vanished rather than let go.
+
+        A hand that left the frame never dropped anything, so a timeout must not
+        count as a drop over the bin -- that would make a lost detection delete
+        an image, which is exactly what the hold window exists to prevent.
+        """
         entry = self._grabs.get(cursor.label)
 
         # Released over the bin: delete the image it was holding.
-        if entry is not None and self.view.is_over_trash(QPointF(cursor.x, cursor.y)):
+        if opened and entry is not None and self.view.is_over_trash(QPointF(cursor.x, cursor.y)):
             item = entry[0]
             for label in [lab for lab, (it, _) in list(self._grabs.items()) if it is item]:
                 self._grabs.pop(label, None)
