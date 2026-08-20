@@ -61,8 +61,7 @@ case "$cmd" in
     }
 
     gate "ruff -- lint and import order" "$PY" -m ruff check .
-    # Conventions linter (file size, module docstrings) lands in #17:
-    # gate "conventions" "$PY" scripts/conventions_lint.py
+    gate "conventions -- file size, architecture, agent-facing docs" "$PY" -m scripts.lint
     gate "import sweep -- every module in the package imports" "$PY" scripts/import_sweep.py
     gate "pytest -- the full suite" "$PY" -m pytest
 

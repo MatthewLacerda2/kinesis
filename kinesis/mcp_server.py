@@ -77,7 +77,11 @@ def add_image(path: str) -> str:
 
 @server.tool()
 def add_images(paths: list[str]) -> str:
-    """Add several image files to the board at once, then fit the view to them."""
+    """Add several image files to the board at once, then fit the view to them.
+
+    paths: absolute paths to image files. A path that fails to load is reported
+    back and the rest are still added.
+    """
     result = _call("add_images", paths=[str(Path(p).expanduser()) for p in paths])
     lines = [f"Added {len(result['added'])} image(s):"]
     lines += [f"  {item['id']}  {item['path']}" for item in result["added"]]
@@ -109,7 +113,10 @@ def list_images() -> str:
 
 @server.tool()
 def remove_image(image_id: str) -> str:
-    """Remove one image from the board by its id (see list_images)."""
+    """Remove one image from the board.
+
+    image_id: the id shown by list_images.
+    """
     removed = _call("remove_image", id=image_id)["removed"]
     return f"Removed {image_id}" if removed else f"No image with id {image_id}"
 
@@ -129,7 +136,10 @@ def fit_view() -> str:
 
 @server.tool()
 def set_camera_background(enabled: bool) -> str:
-    """Show the webcam feed as the board background (True) or the dark board (False)."""
+    """Show the webcam feed as the board background, or the plain dark board.
+
+    enabled: True for the webcam feed, False for the dark board.
+    """
     active = _call("set_background", enabled=enabled)["enabled"]
     return f"Camera background is now {'on' if active else 'off'}."
 
