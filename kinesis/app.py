@@ -285,7 +285,7 @@ class MainWindow(QMainWindow):
                 clone.setSelected(True)
 
     def select_all(self) -> None:
-        for item in self.board.image_items():
+        for item in self.board.board_items():
             item.setSelected(True)
 
     def bring_forward(self) -> None:

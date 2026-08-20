@@ -1,4 +1,10 @@
-"""Save/load .kinesis scene files (JSON: image paths + per-item transform)."""
+"""Save/load .kinesis scene files (JSON: image paths + per-item transform).
+
+The file holds images and nothing else, so this module walks image_items() and
+not board_items() -- a non-image board item has no serialised form here, and a
+kind of item that gains one gains its own list in the format (and a version
+bump) rather than being smuggled into "items".
+"""
 
 from __future__ import annotations
 
@@ -88,7 +94,8 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
             item.item_id = record["id"]
         loaded += 1
 
-    scene._next_z = max((i.zValue() for i in scene.image_items()), default=1.0) + 1.0
+    # Above everything on the board, so the next added item stacks on top.
+    scene._next_z = max((i.zValue() for i in scene.board_items()), default=1.0) + 1.0
 
     vp = data.get("viewport")
     if view is not None and vp:

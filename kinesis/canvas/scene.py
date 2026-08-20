@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QGraphicsScene
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene
 
 from .items import ImageItem, is_supported_image
 
@@ -31,7 +31,13 @@ PASTE_DIR = Path.home() / ".cache" / "kinesis" / "pasted"
 
 
 class BoardScene(QGraphicsScene):
-    """Holds ImageItems and owns z-ordering and placement."""
+    """Holds the board's items and owns z-ordering and placement.
+
+    Two accessors, deliberately distinct: board_items() is the whole board and
+    image_items() is the images on it. They return the same thing today, when an
+    image is the only kind of item there is, and the pen strokes and handles that
+    are coming are exactly why the call sites had to pick one on purpose.
+    """
 
     board_changed = Signal()
 
@@ -44,22 +50,37 @@ class BoardScene(QGraphicsScene):
 
     # ---------- queries ----------
 
+    def board_items(self) -> list[QGraphicsItem]:
+        """Everything on the board, in z-order (bottom first).
+
+        Every scene item is board content: chrome -- trash target, camera button,
+        cursors, HUD -- is painted in BoardView, never added to the scene, so the
+        scene's contents and the board's are the same set. This is the accessor
+        for anything that means "the whole board": fitting, clearing, z-order,
+        placement, select-all.
+        """
+        return sorted(self.items(), key=lambda i: i.zValue())
+
     def image_items(self) -> list[ImageItem]:
-        """Board images in z-order (bottom first)."""
-        return sorted(
-            (i for i in self.items() if isinstance(i, ImageItem)),
-            key=lambda i: i.zValue(),
-        )
+        """The images on the board, in z-order (bottom first).
+
+        A strict subset of board_items(). Use it only where the answer genuinely
+        has to be an image -- an image-shaped payload, or an operation that only
+        makes sense on a picture.
+        """
+        return [i for i in self.board_items() if isinstance(i, ImageItem)]
 
     def find(self, item_id: str) -> ImageItem | None:
+        """Look up an image by its id. Only images carry an id today."""
         for item in self.image_items():
             if item.item_id == item_id:
                 return item
         return None
 
     def content_rect(self) -> QRectF:
+        """Bounding box of everything on the board -- what Ctrl+0 and fit frame."""
         rect = QRectF()
-        for item in self.image_items():
+        for item in self.board_items():
             rect = item.sceneBoundingRect() if rect.isNull() else rect.united(item.sceneBoundingRect())
         return rect
 
@@ -107,7 +128,8 @@ class BoardScene(QGraphicsScene):
         return True
 
     def clear_board(self) -> int:
-        items = self.image_items()
+        """Empty the board -- every item, not just the images. Returns how many."""
+        items = self.board_items()
         for item in items:
             self.removeItem(item)
         self._next_z = 1.0
@@ -133,18 +155,19 @@ class BoardScene(QGraphicsScene):
         item.setZValue(self._next_z)
 
     def send_to_back(self, item: ImageItem) -> None:
-        lowest = min((i.zValue() for i in self.image_items()), default=0.0)
+        # Behind everything on the board, not merely behind the other images.
+        lowest = min((i.zValue() for i in self.board_items()), default=0.0)
         item.setZValue(lowest - 1.0)
 
     # ---------- placement ----------
 
     def _free_position(self, item: ImageItem) -> QPointF:
-        """Find a spot that doesn't cover an existing image.
+        """Find a spot that doesn't cover anything already on the board.
 
         Walks an outward spiral from the origin. Matters most for the MCP path,
         where a batch of images gets added with no pointer position to anchor to.
         """
-        existing = [i.sceneBoundingRect() for i in self.image_items() if i is not item]
+        existing = [i.sceneBoundingRect() for i in self.board_items() if i is not item]
         w, h = item.natural_size()
         s = item.scale()
         size_w, size_h = w * s, h * s

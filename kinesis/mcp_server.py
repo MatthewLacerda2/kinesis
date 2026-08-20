@@ -89,7 +89,11 @@ def add_images(paths: list[str]) -> str:
 
 @server.tool()
 def list_images() -> str:
-    """List the images currently on the board, with their ids and positions."""
+    """List the images currently on the board, with their ids and positions.
+
+    Every item a kinesis board can hold today is an image, so this is also a
+    complete inventory of what clear_board would remove.
+    """
     images = _call("list_images")["images"]
     if not images:
         return "The board is empty."
@@ -112,15 +116,15 @@ def remove_image(image_id: str) -> str:
 
 @server.tool()
 def clear_board() -> str:
-    """Remove every image from the board."""
-    return f"Removed {_call('clear_board')['removed']} image(s)."
+    """Empty the board completely: every item on it, images included."""
+    return f"Removed {_call('clear_board')['removed']} item(s)."
 
 
 @server.tool()
 def fit_view() -> str:
-    """Zoom the board so every image is visible."""
+    """Zoom the board out until everything on it is visible at once."""
     _call("fit")
-    return "Fitted the view to all images."
+    return "Fitted the view to the whole board."
 
 
 @server.tool()
