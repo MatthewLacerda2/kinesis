@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QGuiApplication, QKeySequence
+from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,6 +21,10 @@ from .control import ControlServer
 from .ui.camera_feed import CameraFeed
 from .ui.hand_control import HandControl
 from .ui.tuning import TuningPanel, load_tuning, save_tuning
+
+# Ships as package data rather than being loaded from the repo root, so it
+# resolves identically from an editable checkout and an installed copy.
+ICON_PATH = Path(__file__).parent / "assets" / "icon.png"
 
 
 class MainWindow(QMainWindow):
@@ -323,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     app = QApplication(argv)
     app.setApplicationName("kinesis")
+    app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     window = MainWindow()
     window.show()

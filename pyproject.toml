@@ -28,6 +28,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["kinesis*"]
 
+# The icon is data, not a module, so packages.find does not pick it up on its
+# own -- an install without this line ships a package whose window icon is a
+# path to a file that isn't there.
+[tool.setuptools.package-data]
+kinesis = ["assets/*.png"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
