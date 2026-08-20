@@ -1,0 +1,62 @@
+# The one check a laptop cannot make: that the repo is green on a clean machine
+# -- no .venv that drifted, no cached model, nothing installed by hand that
+# pyproject.toml does not know about. macOS arm64 because that is what the app
+# runs on, and because `python -m kinesis.tracking.model` builds a real
+# HandLandmarker there, which is the call the mediapipe pin exists to survive.
+#
+# Deliberately NOT run on push to main: a merge would only re-run what the PR
+# already proved. And deliberately NOT a required status check -- paths-ignore
+# means a docs-only PR never reports this job at all, and a required check that
+# never arrives blocks the PR forever.
+name: check
+
+on:
+  pull_request:
+    # ready_for_review is load-bearing: the default types (opened, synchronize,
+    # reopened) do not fire when a draft is flipped to ready, and this project
+    # opens every PR as a draft. Without it, a finished PR whose last commit
+    # predates the flip is never checked. The draft guard below is the other
+    # half of the same mechanism -- either alone is broken.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: ['**.md']
+
+# A force-push supersedes the run it interrupted; let it cancel.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: macos-latest   # arm64
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # run.sh insists on .venv/bin/python and would otherwise build the venv
+      # (and install everything) itself on first call -- so build it here, from
+      # the interpreter setup-python just placed, and install into it. The stamp
+      # is what tells run.sh the deps are current; without it the first
+      # ./run.sh call reinstalls the whole dependency set a second time.
+      - name: Install into .venv
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          touch .venv/.deps-installed
+
+      # Downloads the bundle and constructs a real HandLandmarker (IMAGE mode,
+      # CPU, no window, no camera). This is what turns the mediapipe pin from a
+      # comment somebody has to read into a failing build.
+      - name: Verify the hand landmarker loads on arm64
+        run: .venv/bin/python -m kinesis.tracking.model
+
+      - name: ./run.sh check
+        run: ./run.sh check
