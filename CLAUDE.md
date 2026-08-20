@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 **kinesis** is a PureRef-style reference board you drive with your hands — a
-webcam watches you, MediaPipe finds your hands, and a pinch grabs an image on an
-infinite canvas. A Claude agent can drive the same board over MCP, so the images
+webcam watches you, MediaPipe finds your hands, and closing your hand grabs an
+image on an infinite canvas. A Claude agent can drive the same board over MCP, so the images
 in front of you can be put there by a sentence instead of a file dialog.
 
 Use plain language with the user and explain things at a high level; go into the
@@ -43,13 +43,13 @@ gets out of the way, the fact that nothing is modal. Worth ignoring: anything
 that exists because someone wanted a full application.
 
 The word to hold onto is **feel**. This is a project about a gesture landing when
-you expect it to. A feature that makes the board more capable but the pinch less
+you expect it to. A feature that makes the board more capable but the grab less
 certain is a bad trade, every time. This is a scope rule, so it cuts both ways:
 it is a reason to *refuse* an elaborate feature, and equally a reason to spend a
 day on a number that makes grabbing an image feel right.
 
 Two things reliably matter to the user, and they are the first place to look when
-something feels off: **pinch trigger size** and **responsiveness** (cursor lag).
+something feels off: **grab trigger size** and **responsiveness** (cursor lag).
 
 ## Start here
 
@@ -96,10 +96,20 @@ side effect of a feature PR.
   the menu, the hand, and the MCP server all call the same methods. That single
   surface is what makes the board drivable from outside; an event handler that
   mutates items directly is a bug even when it works.
-- **The interaction model is settled**: one-hand pinch moves, two-hand pinch
-  scales, no rotation, no corner handles, trash target bottom-right. `Alt`+drag
+- **The interaction model is settled**: one hand closed moves, two hands closed
+  scale, no rotation, no corner handles, trash target bottom-right. `Alt`+drag
   is the mouse equivalent of a scale, so the app stays fully usable with the
   camera off — and **it starts with tracking off.**
+- **A closed hand is the grab verb; a pinch is a second spelling of it** (#34).
+  Either latches a grab and either holds one, and nothing downstream branches on
+  which. The fist is primary because it is the measurement that survives a
+  single-view camera: it aggregates four fingertip-to-knuckle distances, so no
+  single ill-conditioned axis decides it. A pinch is the separation of two
+  specific points and degrades as the hand turns — measured here, and
+  independently the reason Kinect's grab verb was open-versus-closed in every
+  generation that had one, and the reason MediaPipe's own gesture set ships
+  `Closed_Fist` and no pinch (#45). Do not spend effort making the pinch
+  orientation-robust; it is a bonus that works when it works.
 - **Overlays and on-canvas buttons are painted, not child widgets.** The viewport
   is a `QOpenGLWidget`, and a stacked transparent widget composites badly over
   it. The trash target, the camera button, the cursors and the HUD are all drawn
@@ -269,7 +279,7 @@ remembers.
   sweep walks every module in the package and imports it, catching a circular
   import that the tests, which avoid most of Qt, will not.
   Verify before asserting: if a gate wasn't run, say it wasn't run. CI running
-  green is not a substitute for gate 2 — no runner can tell you a pinch landed.
+  green is not a substitute for gate 2 — no runner can tell you a grab landed.
 - **Size gate: source files ≤ 300 lines of code, test files ≤ 250.** Blank
   lines, `#` comments and docstrings do not count — the house style is to
   explain the *why* in module docstrings, and a cap that counted prose would put

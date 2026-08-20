@@ -1,4 +1,4 @@
-"""Drives the canvas from hand data: cursor interpolation and pinch-to-grab.
+"""Drives the canvas from hand data: cursor interpolation and close-to-grab.
 
 Owns the tracker process lifetime, the 60Hz UI timer, and the grab state
 machine. Gestures affect only this canvas -- the real macOS cursor is never
