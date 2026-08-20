@@ -1,15 +1,14 @@
 """Painted on-canvas buttons: the top-left strip and the bottom-right bin.
 
-Drawn inside BoardView.drawForeground rather than as child widgets -- the
+Drawn inside BoardChrome.draw_foreground rather than as child widgets -- the
 viewport is a QOpenGLWidget and a stacked transparent widget composites badly
 over it (see CLAUDE.md).
 
-It lives here rather than in canvas/view.py because the top-left corner is a
-toolbar now, not a one-off rectangle: layout, hit test and glyph are one
-concern, and keeping them together means adding a button is a name in TOP_LEFT,
-a glyph, and a signal to fire -- not a fourth hardcoded rect and a fourth
-near-identical `is_over_x`. view.py is also the largest file in the repo, and
-this is chrome, not interaction.
+It lives here rather than with the rest of the canvas painting because the
+top-left corner is a toolbar now, not a one-off rectangle: layout, hit test and
+glyph are one concern, and keeping them together means adding a button is a name
+in TOP_LEFT, a glyph, and a signal to fire -- not a fourth hardcoded rect and a
+fourth near-identical `is_over_x`.
 """
 
 from __future__ import annotations

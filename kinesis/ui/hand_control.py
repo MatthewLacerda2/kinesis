@@ -94,7 +94,7 @@ class HandControl(QObject):
         self.proc = self.frames_q = self.control_q = None
         self.cursors.clear()
         self.latest = None
-        self.view.clear_hand_overlay()
+        self.view.chrome.clear_hand_overlay()
         self.status_changed.emit("stopped", "hand tracking off")
 
     def toggle(self) -> None:
@@ -192,8 +192,8 @@ class HandControl(QObject):
             self.view.trash_armed = armed
 
         cursors = [c for label, c in self.cursors.items() if label in seen]
-        self.view.set_hand_overlay(frame, cursors, self.fps, self.latency_ms,
-                                   tuning=self.tuning)
+        self.view.chrome.set_hand_overlay(frame, cursors, self.fps, self.latency_ms,
+                                          tuning=self.tuning)
 
     # ---------- grabbing ----------
 
