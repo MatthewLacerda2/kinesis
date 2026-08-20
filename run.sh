@@ -33,11 +33,29 @@ if [ ! -x "$PY" ]; then
   "$PY" -m pip install --quiet --upgrade pip
 fi
 
-# Reinstall deps only when pyproject changes.
-if [ ! -f "$STAMP" ] || [ pyproject.toml -nt "$STAMP" ]; then
+# Reinstall deps only when pyproject's *contents* change. Deliberately not an
+# mtime test: a fresh git worktree checkout always has a pyproject.toml newer
+# than the shared venv's stamp, so mtime meant every worktree reinstalled on its
+# first run and repointed the shared editable install at itself (#28).
+WANT_HASH="$(shasum -a 256 pyproject.toml | cut -d' ' -f1)"
+HAVE_HASH="$(cat "$STAMP" 2>/dev/null || true)"
+if [ "$WANT_HASH" != "$HAVE_HASH" ]; then
+  # A worktree sharing the main checkout's venv by symlink must never install
+  # into it: the editable mapping is global, so the write lands on every other
+  # worktree and on the main checkout too. Content hashing removes the common
+  # case; this covers a real dependency edit made from a worktree.
+  if [ -L .venv ] \
+     && [ "$(git rev-parse --git-dir 2>/dev/null)" != "$(git rev-parse --git-common-dir 2>/dev/null)" ]; then
+    echo "[kinesis] pyproject.toml differs from the shared venv's install, but this is a" >&2
+    echo "          git worktree using the main checkout's .venv by symlink. Installing" >&2
+    echo "          here would repoint that venv for every worktree at once." >&2
+    echo "          Run the install from the main checkout instead:" >&2
+    echo "              cd \"$(git rev-parse --git-common-dir | xargs dirname)\" && ./run.sh setup" >&2
+    exit 1
+  fi
   echo "[kinesis] installing dependencies…"
   "$PY" -m pip install --quiet -e ".[dev]"
-  touch "$STAMP"
+  printf '%s\n' "$WANT_HASH" > "$STAMP"
 fi
 
 # Model download is a no-op once cached.
@@ -74,6 +92,7 @@ case "$cmd" in
     gate "ruff -- lint and import order" "$PY" -m ruff check .
     gate "conventions -- file size, architecture, agent-facing docs" "$PY" -m scripts.lint
     gate "import sweep -- every module in the package imports" "$PY" scripts/import_sweep.py
+    gate "venv -- the shared editable install still resolves" "$PY" scripts/check_venv.py
     gate "pytest -- the full suite" "$PY" -m pytest
 
     echo
