@@ -191,7 +191,7 @@ class MainWindow(QMainWindow):
     def _refresh_tuning_panel(self) -> None:
         if self.tuning_panel.isVisible():
             self.tuning_panel.update_live(self.hands.latest, self.hands.fps,
-                                          self.hands.latency_ms)
+                                          self.view.chrome.latency_ms)
 
     def closeEvent(self, event) -> None:
         save_tuning(self.tuning)

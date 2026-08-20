@@ -17,6 +17,11 @@ class Hand:
     pinch_ratio: float                   # metric fingertip gap / palm length, for the tuning UI
     pinching: bool                       # post-hysteresis
     hand_scale: float                    # projected wrist->middle-MCP distance, proxy for depth
+    # One more float per hand, and it earns the queue space: the One Euro lag
+    # is the largest term in the capture-to-screen budget and the only one the
+    # UI cannot observe for itself, because it is a property of the cutoff the
+    # tracker chose rather than a delay a clock can time (#38).
+    group_delay_ms: float = 0.0
     landmarks: list[tuple[float, float]] | None = None   # only when preview enabled
 
 

@@ -228,8 +228,10 @@ class TuningPanel(QDockWidget):
         for hand in hands:
             color = hand_color(hand.handedness).name()
             state = "PINCH" if hand.pinching else "open"
+            # The filter lag sits next to the sliders that set it, so beta can
+            # be tuned against the number it moves instead of by feel alone.
             parts.append(
                 f"<span style='color:{color}'><b>{hand.handedness}</b> "
-                f"{hand.pinch_ratio:.3f} {state}</span>")
+                f"{hand.pinch_ratio:.3f} {state}, {hand.group_delay_ms:.0f} ms filter</span>")
         parts.append(f"{fps:.0f} fps, {latency_ms:.0f} ms")
         self.readout.setText(" &nbsp;|&nbsp; ".join(parts))
