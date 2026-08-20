@@ -18,8 +18,8 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("KINESIS_NO_GL", "1")
 
-from PySide6.QtGui import QColor, QImage          # noqa: E402
-from PySide6.QtWidgets import QApplication        # noqa: E402
+from PySide6.QtGui import QColor, QImage  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
 @pytest.fixture(scope="session")
