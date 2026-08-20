@@ -54,7 +54,6 @@ class HandControl(QObject):
         # by any visible hand never expires while one hand stays, so a hand that
         # left the frame kept its grab and went on scaling as a ghost (#33).
         self.last_seen: dict[str, float] = {}
-        self.latency_ms = 0.0
         self.fps = 0.0
 
         # label -> (item, offset from cursor to item origin, in scene coords)
@@ -153,7 +152,9 @@ class HandControl(QObject):
             return
 
         self.fps = frame.fps
-        self.latency_ms = (now - frame.t) * 1000.0
+        # Latency is not measured here any more. The span this tick could time
+        # ends before the easing below and long before the paint, so it read a
+        # fifth of the real budget; chrome stamps it where it actually ends.
 
         seen = {h.handedness for h in frame.hands}
         for label in seen:
@@ -206,8 +207,7 @@ class HandControl(QObject):
             self.view.trash_armed = armed
 
         cursors = [c for label, c in self.cursors.items() if label in seen]
-        self.view.chrome.set_hand_overlay(frame, cursors, self.fps, self.latency_ms,
-                                          tuning=self.tuning)
+        self.view.chrome.set_hand_overlay(frame, cursors, self.fps, tuning=self.tuning)
 
     # ---------- grabbing ----------
 

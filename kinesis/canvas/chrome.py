@@ -10,6 +10,15 @@ future overlay lands here by the same constraint -- and view.py already owns
 every interaction path. Keeping the two fused meant the file that grows without
 bound was also the file that handles input.
 
+The HUD's latency is stamped here, at paint, rather than where the frame is
+consumed. Measured at the tick it reads about 20 ms while the felt lag is over
+a hundred, because everything after the tick -- the cursor easing, the wait for
+Qt to dispatch the repaint, and painting the board itself -- falls outside it. A
+diagnostic that reads 20 ms while the pipeline is slow argues the pipeline is
+fine (#38). Everything past this point (GPU composite and display scan-out) is
+still outside the number, so it is capture-to-paint and labelled as such, not
+capture-to-photons.
+
 Chrome reads board state, it never mutates it. The state it owns is its own
 (the webcam frame, the camera button's lit/unlit state, the hand overlay pushed
 in by the 60Hz tick); anything the input handlers decide -- selection, marquee,
@@ -17,6 +26,8 @@ whether the bin is armed -- is read back off the view.
 """
 
 from __future__ import annotations
+
+import time
 
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -39,9 +50,12 @@ class BoardChrome:
         self._hand_frame = None
         self._hand_cursors: list = []
         self._hand_fps = 0.0
-        self._hand_latency = 0.0
         self._hand_tuning = None
         self._hand_message = ""
+
+        # Capture -> paint, restamped every repaint. Read by the tuning panel
+        # too, so there is one definition of "latency" and not two.
+        self.latency_ms = 0.0
 
     # ---------- camera background ----------
 
@@ -59,13 +73,13 @@ class BoardChrome:
 
     # ---------- hand overlay ----------
 
-    def set_hand_overlay(self, frame, cursors, fps: float, latency_ms: float,
+    def set_hand_overlay(self, frame, cursors, fps: float,
                          tuning=None, message: str = "") -> None:
-        """Called from the 60Hz hand-tracking tick."""
+        """Called from the hand-tracking tick. No latency argument: the tick
+        cannot measure a span that has not finished yet."""
         self._hand_frame = frame
         self._hand_cursors = cursors
         self._hand_fps = fps
-        self._hand_latency = latency_ms
         self._hand_message = message
         if tuning is not None:
             self._hand_tuning = tuning
@@ -75,6 +89,7 @@ class BoardChrome:
         self._hand_frame = None
         self._hand_cursors = []
         self._hand_tuning = None
+        self.latency_ms = 0.0
         # Tracking stopped, so nothing is being held over the bin any more.
         self.view.trash_armed = False
         self.view.viewport().update()
@@ -126,10 +141,14 @@ class BoardChrome:
         if self._hand_tuning is not None:
             vp = view.viewport().rect()
             if self._hand_frame is not None:
+                # Stamped before the overlay is drawn but after the board is:
+                # the easing, the repaint wait and the scene paint are all
+                # already behind us, which is the point of measuring here.
+                self.latency_ms = (time.perf_counter() - self._hand_frame.t) * 1000.0
                 overlay.draw_pip(painter, vp, self._hand_frame.jpeg,
                                  self._hand_frame.hands, self._hand_tuning)
             overlay.draw_cursors(painter, self._hand_cursors)
-            overlay.draw_hud(painter, vp, self._hand_fps, self._hand_latency,
+            overlay.draw_hud(painter, vp, self._hand_fps, self.latency_ms,
                              self._hand_frame.hands if self._hand_frame else [],
                              self._hand_message)
 

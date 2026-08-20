@@ -171,6 +171,7 @@ class GestureEngine:
                 pinch_ratio=ratio,
                 pinching=state.pinching,
                 hand_scale=smooth_scale,
+                group_delay_ms=state.point.group_delay * 1000.0,
                 landmarks=list(det.landmarks) if include_landmarks else None,
             ))
 

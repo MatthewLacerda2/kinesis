@@ -105,15 +105,24 @@ def draw_pip(painter: QPainter, viewport: QRect, jpeg: bytes | None,
 
 def draw_hud(painter: QPainter, viewport: QRect, fps: float, latency_ms: float,
              hands: list, message: str = "") -> None:
-    """Tracker FPS, end-to-end latency and per-hand pinch ratio, top-right."""
+    """Capture-to-paint latency, tracker FPS and per-hand pinch state, top-right.
+
+    Two delays, shown apart and never summed. `capture->paint` is wall time
+    the caller stamped at paint, covering inference, the queue, the tick, the
+    easing and the board's own paint. `filter` is the One Euro group delay --
+    not a queue but the lag the smoothing itself adds at the cutoff it chose,
+    which is why it belongs to a hand and collapses when that hand moves.
+    Adding them would hide which of the two to go after.
+    """
     font = QFont()
     font.setPixelSize(12)
     painter.setFont(font)
 
-    lines = [f"tracker {fps:4.1f} fps    latency {latency_ms:5.1f} ms"]
+    lines = [f"tracker {fps:4.1f} fps    capture→paint {latency_ms:5.1f} ms"]
     for hand in hands:
         lines.append(
             f"{hand.handedness:<5} ratio {hand.pinch_ratio:5.3f}"
+            f"  filter {hand.group_delay_ms:5.1f} ms"
             f"  {'PINCH' if hand.pinching else '     '}"
         )
     if not hands:
