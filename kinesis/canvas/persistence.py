@@ -16,7 +16,11 @@ from PySide6.QtCore import QPointF
 
 from .scene import BoardScene
 
-FORMAT_VERSION = 1
+# 2: items carry a description (#9). A version 1 file has none, and there are no
+# migrations, so it is refused rather than loaded with the field quietly blank --
+# "no description" and "written before the field existed" would otherwise be the
+# same board, and the second one silently loses text somebody wrote.
+FORMAT_VERSION = 2
 
 
 def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = False) -> Path:
@@ -101,6 +105,7 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
         item.setScale(record.get("scale", 1.0))
         item.setRotation(record.get("rotation", 0.0))
         item.setZValue(record.get("z", 0.0))
+        item.description = record.get("description") or ""
         if record.get("id"):
             item.item_id = record["id"]
         loaded += 1

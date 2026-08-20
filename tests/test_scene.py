@@ -127,6 +127,45 @@ def test_clear_board_resets_z_so_the_next_image_starts_low(board, make_image):
     assert fresh.zValue() < top_z
 
 
+# ---------- describe / search ----------
+
+def test_describe_image_takes_an_item_or_an_id_and_reports_the_change(board, make_image,
+                                                                     changes):
+    item = board.add_image(make_image())
+    assert board.describe_image(item, "a copper kettle") is item
+    assert item.description == "a copper kettle"
+    assert board.describe_image(item.item_id, "  a kettle, steaming  ") is item
+    assert item.description == "a kettle, steaming", "stored text is stripped"
+    assert len(changes) == 3, "a description is board state, so it is a board change"
+
+
+def test_describing_an_unknown_id_reports_none_and_changes_nothing(board, make_image):
+    board.add_image(make_image())
+    seen = []
+    board.board_changed.connect(lambda: seen.append(1))
+    assert board.describe_image("nope", "anything") is None
+    assert seen == []
+
+
+def test_a_duplicate_carries_the_description_of_what_it_copies(board, make_image):
+    """The clone is the same picture, so the reading of it is still true."""
+    original = board.describe_image(board.add_image(make_image()), "a copper kettle")
+    assert board.duplicate(original).description == "a copper kettle"
+
+
+def test_search_puts_described_images_ahead_of_file_name_hits(board, make_image):
+    guessed = board.add_image(make_image("kettle-ref.png"))
+    read = board.add_image(make_image("img_204.png"))
+    board.describe_image(read, "a kettle on a stove")
+    assert board.search("kettle") == [(read, "description"), (guessed, "path")]
+
+
+def test_an_undescribed_image_matches_nothing_a_description_would(board, make_image):
+    board.add_image(make_image("img_204.png"))
+    assert board.search("kettle") == []
+    assert board.search("") == [], "no description is not a match for everything"
+
+
 # ---------- duplicate ----------
 
 def test_duplicate_copies_the_transform_and_offsets_the_copy(board, make_image):

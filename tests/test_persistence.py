@@ -127,6 +127,49 @@ def test_a_missing_image_is_reported_and_the_rest_still_load(populated, tmp_path
     assert [Path(m).name for m in missing] == [Path(gone).name]
 
 
+def test_descriptions_survive_the_round_trip_and_absence_survives_it_too(populated, tmp_path):
+    """The point of persisting them: the reading is done once, not once a session.
+
+    The image left undescribed matters as much as the described ones -- if a
+    load invented a description for it, a later caller would think that picture
+    had already been looked at.
+    """
+    board, items = populated
+    items[0].description = "a copper kettle, steaming"
+    items[1].description = "hand study, three fingers splayed"
+    path = save_scene(board, tmp_path / "board.kinesis")
+
+    fresh = BoardScene()
+    load_scene(fresh, path)
+    by_id = {i.item_id: i.description for i in fresh.image_items()}
+    assert by_id[items[0].item_id] == "a copper kettle, steaming"
+    assert by_id[items[1].item_id] == "hand study, three fingers splayed"
+    assert by_id[items[2].item_id] == "", "an undescribed image came back described"
+
+
+def test_a_file_from_the_previous_format_version_is_refused_intact(populated, tmp_path):
+    """The bump is only worth anything if the old file loses to it, loudly.
+
+    Version 1 files have no description field. Reading one anyway would produce a
+    board that looks complete and is silently missing text somebody wrote, which
+    is precisely what the version check exists to prevent -- and the board that
+    was already open has to still be there afterwards, because a refusal that
+    cleared the canvas first would be worse than the misread it prevented.
+    """
+    board, items = populated
+    path = save_scene(board, tmp_path / "old.kinesis")
+    stale = json.loads(path.read_text())
+    stale["version"] = FORMAT_VERSION - 1
+    for record in stale["items"]:
+        record.pop("description", None)
+    path.write_text(json.dumps(stale))
+
+    before = snapshot(board)
+    with pytest.raises(ValueError, match=str(FORMAT_VERSION - 1)):
+        load_scene(board, path)
+    assert snapshot(board) == before, "a refused load disturbed the board that was open"
+
+
 def test_a_file_from_another_format_version_is_refused(board, tmp_path, make_image):
     """No migrations, by policy -- so an unknown version must not be read at all."""
     board.add_image(make_image())

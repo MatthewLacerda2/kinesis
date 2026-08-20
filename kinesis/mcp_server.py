@@ -23,8 +23,10 @@ server = MCPServer(
     instructions=(
         "Controls a running kinesis reference board: add images to it, remove "
         "them, list what is on it, screenshot it, and switch the canvas "
-        "background between the webcam feed and the plain dark board. The "
-        "kinesis app must already be open."
+        "background between the webcam feed and the plain dark board. Images "
+        "can also be described -- look at one, record what it shows with "
+        "describe_image, and it stays findable by meaning from then on, in this "
+        "session and every later one. The kinesis app must already be open."
     ),
 )
 
@@ -91,9 +93,23 @@ def add_images(paths: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _describe_line(item: dict) -> str:
+    """One image as a line, ending in what it is or in the fact nobody knows."""
+    name = Path(item["path"]).name if item["path"] else "(pasted)"
+    said = item.get("description") or "NOT DESCRIBED YET"
+    return (f"  {item['id']}  {name}  {item['width']}x{item['height']}"
+            f"  at ({item['x']}, {item['y']})  scale {item['scale']}"
+            f"\n      {said}")
+
+
 @server.tool()
 def list_images() -> str:
-    """List the images currently on the board, with their ids and positions.
+    """List the images on the board: ids, positions, and what each one is.
+
+    The last line of each entry is the image's description. "NOT DESCRIBED YET"
+    means no client has ever looked at that image and written down what it
+    shows -- nothing fills that in automatically, so it is a real gap and not a
+    formatting quirk. Those are the images to look at and describe_image.
 
     Every item a kinesis board can hold today is an image, so this is also a
     complete inventory of what clear_board would remove.
@@ -102,12 +118,49 @@ def list_images() -> str:
     if not images:
         return "The board is empty."
     lines = [f"{len(images)} image(s) on the board:"]
-    for item in images:
-        name = Path(item["path"]).name if item["path"] else "(pasted)"
-        lines.append(
-            f"  {item['id']}  {name}  {item['width']}x{item['height']}"
-            f"  at ({item['x']}, {item['y']})  scale {item['scale']}"
-        )
+    lines += [_describe_line(item) for item in images]
+    return "\n".join(lines)
+
+
+@server.tool()
+def describe_image(image_id: str, description: str) -> str:
+    """Record what an image shows, so it never has to be looked at twice.
+
+    The board stores the text and never writes it for you: look at the image
+    yourself, then say what it is here. It is saved with the board, so a later
+    session -- or another client entirely -- can act on the image by meaning
+    ("the two vessel photos") instead of by id, and nobody re-reads a picture
+    that has already been read. It is never shown to the person at the board.
+
+    image_id: the id shown by list_images.
+    description: what the image is, in your own words. Pass an empty string to
+    take a wrong description back, leaving the image marked as not yet described.
+    """
+    reply = _call("describe_image", id=image_id, description=description)
+    if not reply["described"]:
+        return f"No image with id {image_id}"
+    if not reply["description"]:
+        return f"Cleared the description of {image_id}; it is undescribed again."
+    return f"{image_id} is now described as: {reply['description']}"
+
+
+@server.tool()
+def find_images(query: str) -> str:
+    """Find images on the board by what they show, rather than by id.
+
+    query: what to look for. Matched against the descriptions written by
+    describe_image and, for images nobody has described, against file names.
+
+    Each result says which of the two it matched on. A "description" hit is
+    something a client looked at and recorded; a "path" hit is only a file name
+    and may be nothing of the sort, so check it before acting on it.
+    """
+    matches = _call("find_images", query=query)["matches"]
+    if not matches:
+        return f"Nothing on the board matches {query!r}."
+    lines = [f"{len(matches)} match(es) for {query!r}:"]
+    for item in matches:
+        lines.append(f"{_describe_line(item)}   [matched on {item['matched']}]")
     return "\n".join(lines)
 
 
