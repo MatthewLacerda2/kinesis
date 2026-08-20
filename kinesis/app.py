@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
         self.board = BoardScene(self)
         self.view = BoardView(self.board, self)
         self.setCentralWidget(self.view)
+        self.view.add_images_clicked.connect(self.add_images_dialog)
 
         self.scene_path: Path | None = None
         self.board.board_changed.connect(self._update_status)

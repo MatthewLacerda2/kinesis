@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QGraphicsView
 
-from ..ui import overlay
+from ..ui import buttons, overlay
 from .items import ImageItem, is_supported_image
 from .scene import BoardScene
 
@@ -25,15 +25,10 @@ MIN_ZOOM, MAX_ZOOM = 0.02, 64.0
 SELECT_COLOR = QColor(120, 190, 255)
 MARQUEE_FILL = QColor(120, 190, 255, 40)
 
-TRASH_SIZE = 52
-TRASH_MARGIN = 18
-
-CAM_SIZE = 52
-CAM_MARGIN = 18
-
 
 class BoardView(QGraphicsView):
     camera_button_clicked = Signal()
+    add_images_clicked = Signal()
 
     def __init__(self, scene: BoardScene, parent=None):
         super().__init__(scene, parent)
@@ -78,6 +73,12 @@ class BoardView(QGraphicsView):
         self._hand_tuning = None
         self._hand_message = ""
 
+        # The painted top-left strip: button name -> what a click on it emits.
+        self._corner_signals = {
+            "camera": self.camera_button_clicked,
+            "add_images": self.add_images_clicked,
+        }
+
         scene.changed.connect(lambda *_: self.viewport().update())
         scene.selectionChanged.connect(self.viewport().update)
 
@@ -98,48 +99,13 @@ class BoardView(QGraphicsView):
     # ---------- trash ----------
 
     def trash_rect(self) -> QRect:
-        vp = self.viewport().rect()
-        return QRect(vp.width() - TRASH_SIZE - TRASH_MARGIN,
-                     vp.height() - TRASH_SIZE - TRASH_MARGIN,
-                     TRASH_SIZE, TRASH_SIZE)
+        return buttons.trash_rect(self.viewport().rect())
 
     def is_over_trash(self, pos: QPoint | QPointF) -> bool:
         point = pos.toPoint() if isinstance(pos, QPointF) else pos
         return self.trash_rect().contains(point)
 
-    def _draw_trash(self, painter: QPainter) -> None:
-        box = self.trash_rect()
-        armed = self.trash_armed
-        body = QColor(200, 90, 80) if armed else QColor(52, 54, 60)
-        line = QColor(255, 235, 232) if armed else QColor(150, 156, 168)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(body)
-        painter.drawRoundedRect(box, 9, 9)
-
-        # A small bin glyph: lid, body, two ribs.
-        painter.setPen(QPen(line, 1.8))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        cx, cy = box.center().x(), box.center().y()
-        w, h = 18, 20
-        painter.drawLine(cx - w // 2 - 2, cy - h // 2, cx + w // 2 + 2, cy - h // 2)
-        painter.drawLine(cx - 4, cy - h // 2 - 4, cx + 4, cy - h // 2 - 4)
-        painter.drawLine(cx - 4, cy - h // 2 - 4, cx - 4, cy - h // 2)
-        painter.drawLine(cx + 4, cy - h // 2 - 4, cx + 4, cy - h // 2)
-        painter.drawLine(cx - w // 2, cy - h // 2, cx - w // 2 + 2, cy + h // 2)
-        painter.drawLine(cx + w // 2, cy - h // 2, cx + w // 2 - 2, cy + h // 2)
-        painter.drawLine(cx - w // 2 + 2, cy + h // 2, cx + w // 2 - 2, cy + h // 2)
-        painter.drawLine(cx - 3, cy - h // 2 + 5, cx - 3, cy + h // 2 - 3)
-        painter.drawLine(cx + 3, cy - h // 2 + 5, cx + 3, cy + h // 2 - 3)
-
     # ---------- camera background ----------
-
-    def camera_rect(self) -> QRect:
-        return QRect(CAM_MARGIN, CAM_MARGIN, CAM_SIZE, CAM_SIZE)
-
-    def is_over_camera_button(self, pos: QPoint | QPointF) -> bool:
-        point = pos.toPoint() if isinstance(pos, QPointF) else pos
-        return self.camera_rect().contains(point)
 
     def set_background_image(self, image) -> None:
         """Newest webcam frame, or None to fall back to the dark background."""
@@ -152,31 +118,6 @@ class BoardView(QGraphicsView):
         if not on:
             self._bg_image = None
         self.viewport().update()
-
-    def _draw_camera_button(self, painter: QPainter) -> None:
-        box = self.camera_rect()
-        on = self.camera_on
-        body = QColor(80, 150, 230) if on else QColor(52, 54, 60)
-        line = QColor(240, 246, 255) if on else QColor(150, 156, 168)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(body)
-        painter.drawRoundedRect(box, 9, 9)
-
-        # A small camera glyph: body, lens, viewfinder bump.
-        cx, cy = box.center().x(), box.center().y()
-        painter.setPen(QPen(line, 1.8))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(QRect(cx - 11, cy - 7, 22, 16), 3, 3)
-        painter.drawLine(cx - 5, cy - 7, cx - 3, cy - 11)
-        painter.drawLine(cx + 3, cy - 11, cx + 5, cy - 7)
-        painter.drawLine(cx - 3, cy - 11, cx + 3, cy - 11)
-        painter.drawEllipse(QPoint(cx, cy + 1), 5, 5)
-
-        if not on:
-            # Struck through while off, so the state reads at a glance.
-            painter.setPen(QPen(QColor(200, 90, 80), 2))
-            painter.drawLine(cx - 13, cy + 11, cx + 13, cy - 13)
 
     # ---------- painting ----------
 
@@ -217,8 +158,8 @@ class BoardView(QGraphicsView):
             painter.setBrush(MARQUEE_FILL)
             painter.drawRect(self._marquee.normalized())
 
-        self._draw_trash(painter)
-        self._draw_camera_button(painter)
+        buttons.draw_trash(painter, self.viewport().rect(), self.trash_armed)
+        buttons.draw_top_left(painter, ("camera",) if self.camera_on else ())
 
         if self._hand_tuning is not None:
             vp = self.viewport().rect()
@@ -314,9 +255,10 @@ class BoardView(QGraphicsView):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
-            # Clicking the corner button toggles the webcam background.
-            if self.is_over_camera_button(pos):
-                self.camera_button_clicked.emit()
+            # Top-left strip: camera background, add images.
+            hit = buttons.hit_top_left(pos)
+            if hit is not None:
+                self._corner_signals[hit].emit()
                 event.accept()
                 return
 
