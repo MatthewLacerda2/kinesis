@@ -30,8 +30,13 @@ class HandFrame:
 
 @dataclass(frozen=True)
 class TrackerStatus:
-    """Out-of-band news from the tracker: startup, camera loss, fatal errors."""
-    state: str                           # "starting" | "running" | "error" | "stopped"
+    """Out-of-band news from the tracker: startup, camera loss, fatal errors.
+
+    "warning" is non-fatal -- the tracker keeps running and the UI must not tear
+    it down; it is how a camera that is running but not in the shape we asked
+    for gets said out loud instead of silently costing frame rate.
+    """
+    state: str                           # "starting" | "running" | "warning" | "error" | "stopped"
     message: str = ""
 
 

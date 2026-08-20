@@ -5,6 +5,12 @@ the UI and a camera crash can't take the canvas down with it.
 
 All smoothing and pinch decisions happen here, so the UI consumes clean,
 already-decided state.
+
+The camera is a shared device: opening it here while the canvas background has
+it open too means macOS picks one format for both, and the second client to
+open is the one that decides. Asking for the same size the background asks for
+is what keeps that harmless -- so the frames are watched and any other size is
+reported, rather than silently cropping the tracked field of view.
 """
 
 from __future__ import annotations
@@ -22,6 +28,11 @@ PREVIEW_QUALITY = 60
 
 # How many consecutive bad reads before we call the camera dead.
 MAX_BAD_READS = 60
+
+# How many consecutive frames of an unexpected size before we say so. macOS
+# spends about half a second reconfiguring a shared camera and pushes a few
+# odd-sized frames through on the way; only a size that outlives that is real.
+SHAPE_WARN_FRAMES = 15
 
 
 def _publish(q: mp.Queue, item) -> None:
@@ -62,6 +73,7 @@ class _Latest:
         self.t = 0.0
         self.seq = 0
         self.error: str | None = None
+        self.warning: str | None = None   # non-fatal; drained by the inference loop
         self.stop = False
 
 
@@ -73,6 +85,7 @@ def _capture_loop(cap, cv2, shared: _Latest) -> None:
     path between a frame arriving and landmarks coming out.
     """
     bad = 0
+    off_size = 0
     while not shared.stop:
         ok, frame = cap.read()
         if not ok or frame is None or not frame.size:
@@ -85,6 +98,21 @@ def _capture_loop(cap, cv2, shared: _Latest) -> None:
             time.sleep(0.01)
             continue
         bad = 0
+
+        # The only trustworthy report of the format we actually got.
+        h, w = frame.shape[:2]
+        if (w, h) == (CAM_W, CAM_H):
+            off_size = 0
+        else:
+            off_size += 1
+            if off_size == SHAPE_WARN_FRAMES:
+                with shared.lock:
+                    shared.warning = (
+                        f"Camera is sending {w}x{h}, not the {CAM_W}x{CAM_H} asked for — "
+                        "another client (most likely the camera background) reformatted "
+                        "the shared camera. Tracking works but the field of view is cropped."
+                    )
+
         stamp = time.perf_counter()
         # Mirror before inference: MediaPipe assigns handedness assuming a
         # selfie-view image, and this also puts landmark x straight into the
@@ -124,9 +152,12 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
     cap = None
     try:
         cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
-        cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
+        # Tuple, not a generator: all three sets must actually run.
+        set_ok = all((
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W),
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H),
+            cap.set(cv2.CAP_PROP_FPS, CAM_FPS),
+        ))
 
         if not cap.isOpened():
             _publish(frames_q, TrackerStatus(
@@ -149,6 +180,18 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
                 "Privacy & Security → Camera, then restart kinesis",
             ))
             return
+
+        # set() returns True even when the device ignores the request, and get()
+        # echoes back what was asked rather than what is arriving -- measured, both
+        # stayed clean while a second client had the camera reformatted. They are
+        # still checked here because they do catch a size the camera cannot do at
+        # all; the frame sizes _capture_loop watches catch everything else.
+        got = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+               int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        if not set_ok or got != (CAM_W, CAM_H):
+            _publish(frames_q, TrackerStatus(
+                "warning",
+                f"Camera would not take {CAM_W}x{CAM_H}; it reports {got[0]}x{got[1]}."))
 
         options = vision.HandLandmarkerOptions(
             base_options=mp_python.BaseOptions(model_asset_path=str(model_path)),
@@ -198,6 +241,7 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
                     if shared.error:
                         _publish(frames_q, TrackerStatus("error", shared.error))
                         break
+                    warning, shared.warning = shared.warning, None
                     if shared.seq == last_seq:
                         rgb = None
                     else:
@@ -205,6 +249,8 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
                         frame = shared.bgr
                         t_capture = shared.t
                         last_seq = shared.seq
+                if warning:
+                    _publish(frames_q, TrackerStatus("warning", warning))
                 if rgb is None:
                     shared.ready.wait(0.05)   # woken the moment one lands
                     continue
