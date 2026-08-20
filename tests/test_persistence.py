@@ -105,7 +105,9 @@ def test_loading_replaces_the_board_rather_than_adding_to_it(populated, tmp_path
 
 
 def test_the_next_image_added_after_a_load_lands_on_top(populated, tmp_path, make_image):
-    board, _items = populated
+    """The z counter has to follow the file, not restart from how many items came in."""
+    board, items = populated
+    items[0].setZValue(90)  # a saved board can hold z values far above its item count
     path = save_scene(board, tmp_path / "board.kinesis")
     fresh = BoardScene()
     load_scene(fresh, path)

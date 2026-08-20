@@ -125,8 +125,12 @@ def test_ping_answers_with_the_board_size_and_background_state(control, make_ima
 
 def test_set_background_switches_and_toggles(control):
     assert send(control, "set_background", enabled=True) == {"enabled": True, "ok": True}
-    assert send(control, "set_background")["enabled"] is False, "omitting enabled toggles"
-    assert send(control, "set_background")["enabled"] is True
+    # Asking for a state you are already in is a no-op, not a flip: an agent that
+    # cannot see the board has no way to know which one it would get.
+    assert send(control, "set_background", enabled=True)["enabled"] is True
+    assert send(control, "set_background", enabled=False)["enabled"] is False
+    assert send(control, "set_background")["enabled"] is True, "omitting enabled toggles"
+    assert send(control, "set_background")["enabled"] is False
 
 
 def test_add_image_returns_the_id_the_caller_needs_to_remove_it(control, make_image):
