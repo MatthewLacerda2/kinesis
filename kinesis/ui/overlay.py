@@ -1,6 +1,6 @@
 """Debug overlay: picture-in-picture camera preview, hand cursors, HUD.
 
-Drawn inside BoardView.drawForeground rather than as a stacked child widget --
+Drawn inside BoardChrome.draw_foreground rather than as a stacked child widget --
 the viewport is a QOpenGLWidget, and painting into it directly avoids the
 compositing problems an overlapping transparent widget runs into.
 """

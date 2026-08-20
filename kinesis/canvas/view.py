@@ -3,6 +3,11 @@
 Scaling is a two-hand pinch gesture (see ui/hand_control.py), so there are no
 corner handles on the canvas. Alt+drag is the mouse equivalent, keeping the app
 fully usable without the camera. There is no rotation.
+
+Interaction only: everything the view paints lives in canvas/chrome.py, and the
+paint callbacks here do nothing but hand off to it. Painted chrome grows with
+every overlay the app gains, and this file already owns every input path -- so
+they are kept apart rather than growing together.
 """
 
 from __future__ import annotations
@@ -12,18 +17,16 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QPainter
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QGraphicsView
 
-from ..ui import buttons, overlay
+from ..ui import buttons
+from .chrome import BoardChrome
 from .items import ImageItem, is_supported_image
 from .scene import BoardScene
 
 MIN_ZOOM, MAX_ZOOM = 0.02, 64.0
-
-SELECT_COLOR = QColor(120, 190, 255)
-MARQUEE_FILL = QColor(120, 190, 255, 40)
 
 
 class BoardView(QGraphicsView):
@@ -54,24 +57,15 @@ class BoardView(QGraphicsView):
         self._panning = False
         self._pan_last = QPoint()
         self._marquee_origin: QPoint | None = None
-        self._marquee: QRect | None = None
+        self.marquee: QRect | None = None     # read back by the chrome painter
         self._scale_op: dict | None = None    # Alt+drag scaling
         self._dragging_items = False          # a plain mouse move of selected items
 
         # Set while something is held over the trash, by mouse or by hand.
         self.trash_armed = False
 
-        # Webcam background: newest frame, or None for the plain dark board.
-        self._bg_image = None
-        self.camera_on = False
-
-        # Hand-tracking overlay state, pushed in by HandControl each UI tick.
-        self._hand_frame = None
-        self._hand_cursors: list = []
-        self._hand_fps = 0.0
-        self._hand_latency = 0.0
-        self._hand_tuning = None
-        self._hand_message = ""
+        # Everything painted over and behind the board, and the state it owns.
+        self.chrome = BoardChrome(self)
 
         # The painted top-left strip: button name -> what a click on it emits.
         self._corner_signals = {
@@ -89,7 +83,7 @@ class BoardView(QGraphicsView):
         every caller here (Alt+drag scale, delete, z-order) is an image op."""
         return [i for i in self.board.selectedItems() if isinstance(i, ImageItem)]
 
-    def _selection_rect(self) -> QRectF:
+    def selection_rect(self) -> QRectF:
         rect = QRectF()
         for item in self.selected_items():
             r = item.sceneBoundingRect()
@@ -105,92 +99,15 @@ class BoardView(QGraphicsView):
         point = pos.toPoint() if isinstance(pos, QPointF) else pos
         return self.trash_rect().contains(point)
 
-    # ---------- camera background ----------
-
-    def set_background_image(self, image) -> None:
-        """Newest webcam frame, or None to fall back to the dark background."""
-        self._bg_image = image
-        self.viewport().update()
-
-    def set_camera_on(self, on: bool) -> None:
-        """Button state; tracks the request, not the first frame's arrival."""
-        self.camera_on = on
-        if not on:
-            self._bg_image = None
-        self.viewport().update()
-
     # ---------- painting ----------
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
-        image = self._bg_image
-        if image is None or image.isNull():
+        if not self.chrome.draw_background(painter):
             super().drawBackground(painter, rect)
-            return
-
-        painter.save()
-        painter.resetTransform()  # the feed is screen-fixed; it must not pan or zoom
-        vp = self.viewport().rect()
-        painter.fillRect(vp, self.board.backgroundBrush())
-
-        # Cover the viewport, centre-cropped, so the feed never letterboxes.
-        scale = max(vp.width() / image.width(), vp.height() / image.height())
-        src_w = min(image.width(), vp.width() / scale)
-        src_h = min(image.height(), vp.height() / scale)
-        source = QRectF((image.width() - src_w) / 2, (image.height() - src_h) / 2,
-                        src_w, src_h)
-        painter.drawImage(QRectF(vp), image, source)
-        painter.restore()
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         super().drawForeground(painter, rect)
-        painter.save()
-        painter.resetTransform()  # draw in viewport px so overlays keep a fixed size
-
-        sel = self._selection_rect()
-        if not sel.isNull():
-            tl, br = self.mapFromScene(sel.topLeft()), self.mapFromScene(sel.bottomRight())
-            painter.setPen(QPen(SELECT_COLOR, 1, Qt.PenStyle.DashLine))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(QRect(tl, br))
-
-        if self._marquee is not None:
-            painter.setPen(QPen(SELECT_COLOR, 1, Qt.PenStyle.DashLine))
-            painter.setBrush(MARQUEE_FILL)
-            painter.drawRect(self._marquee.normalized())
-
-        buttons.draw_trash(painter, self.viewport().rect(), self.trash_armed)
-        buttons.draw_top_left(painter, ("camera",) if self.camera_on else ())
-
-        if self._hand_tuning is not None:
-            vp = self.viewport().rect()
-            if self._hand_frame is not None:
-                overlay.draw_pip(painter, vp, self._hand_frame.jpeg,
-                                 self._hand_frame.hands, self._hand_tuning)
-            overlay.draw_cursors(painter, self._hand_cursors)
-            overlay.draw_hud(painter, vp, self._hand_fps, self._hand_latency,
-                             self._hand_frame.hands if self._hand_frame else [],
-                             self._hand_message)
-
-        painter.restore()
-
-    def set_hand_overlay(self, frame, cursors, fps: float, latency_ms: float,
-                         tuning=None, message: str = "") -> None:
-        """Called from the 60Hz hand-tracking tick."""
-        self._hand_frame = frame
-        self._hand_cursors = cursors
-        self._hand_fps = fps
-        self._hand_latency = latency_ms
-        self._hand_message = message
-        if tuning is not None:
-            self._hand_tuning = tuning
-        self.viewport().update()
-
-    def clear_hand_overlay(self) -> None:
-        self._hand_frame = None
-        self._hand_cursors = []
-        self._hand_tuning = None
-        self.trash_armed = False
-        self.viewport().update()
+        self.chrome.draw_foreground(painter)
 
     # ---------- zoom ----------
 
@@ -280,7 +197,7 @@ class BoardView(QGraphicsView):
                 if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
                     self.board.clearSelection()
                 self._marquee_origin = pos
-                self._marquee = QRect(pos, pos)
+                self.marquee = QRect(pos, pos)
                 event.accept()
                 return
 
@@ -307,7 +224,7 @@ class BoardView(QGraphicsView):
             return
 
         if self._marquee_origin is not None:
-            self._marquee = QRect(self._marquee_origin, pos)
+            self.marquee = QRect(self._marquee_origin, pos)
             self.viewport().update()
             event.accept()
             return
@@ -335,14 +252,14 @@ class BoardView(QGraphicsView):
             return
 
         if self._marquee_origin is not None:
-            rect = self._marquee.normalized() if self._marquee else QRect()
+            rect = self.marquee.normalized() if self.marquee else QRect()
             if rect.width() > 3 and rect.height() > 3:
                 scene_rect = self.mapToScene(rect).boundingRect()
                 for item in self.board.board_items():
                     if item.sceneBoundingRect().intersects(scene_rect):
                         item.setSelected(True)
             self._marquee_origin = None
-            self._marquee = None
+            self.marquee = None
             self.viewport().update()
             event.accept()
             return
@@ -374,7 +291,7 @@ class BoardView(QGraphicsView):
             self.board.clearSelection()
             item.setSelected(True)
             items = [item]
-        center = self._selection_rect().center()
+        center = self.selection_rect().center()
         start = self.mapToScene(pos)
         self._scale_op = {
             "center": center,

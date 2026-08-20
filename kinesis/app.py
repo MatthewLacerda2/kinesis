@@ -137,10 +137,10 @@ class MainWindow(QMainWindow):
     def _sync_background_state(self) -> None:
         on = self.camera_bg.active
         self.background_action.setChecked(on)
-        self.view.set_camera_on(on)
+        self.view.chrome.set_camera_on(on)
 
     def _on_camera_frame(self) -> None:
-        self.view.set_background_image(self.camera_bg.latest())
+        self.view.chrome.set_background_image(self.camera_bg.latest())
 
     def _on_camera_warning(self, message: str) -> None:
         """Feed is up but not as asked — say so, don't interrupt."""
