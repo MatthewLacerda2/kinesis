@@ -135,7 +135,6 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
 
     import cv2
     import mediapipe as mp_lib
-    import numpy as np
     from mediapipe.tasks import python as mp_python
     from mediapipe.tasks.python import vision
 

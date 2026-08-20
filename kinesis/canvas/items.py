@@ -16,7 +16,14 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import (
-    QBitmap, QColor, QImage, QImageReader, QPainterPath, QPen, QPixmap, QRegion,
+    QBitmap,
+    QColor,
+    QImage,
+    QImageReader,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRegion,
     QTransform,
 )
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem

@@ -85,7 +85,6 @@ def test_holds_pinch_through_the_hysteresis_band():
     # Latch first, then hover inside the band.
     for h in feed(engine, [0.02] * 3):
         ratios.append(h.pinching)
-    scale = 0.2  # wrist->mmcp distance in the default synthetic hand
     for gap in [0.070, 0.080, 0.088, 0.070]:   # ratio 0.35..0.44
         h = feed(engine, [gap], start=1.0)[0]
         assert 0.30 < h.pinch_ratio < 0.45, h.pinch_ratio

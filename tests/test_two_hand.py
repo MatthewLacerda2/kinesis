@@ -14,14 +14,14 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("KINESIS_NO_GL", "1")
 
-from PySide6.QtCore import QPointF                       # noqa: E402
-from PySide6.QtGui import QColor, QImage                 # noqa: E402
-from PySide6.QtWidgets import QApplication               # noqa: E402
+from PySide6.QtCore import QPointF  # noqa: E402
+from PySide6.QtGui import QColor, QImage  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from kinesis.canvas.scene import BoardScene              # noqa: E402
-from kinesis.canvas.view import BoardView                # noqa: E402
-from kinesis.tracking.protocol import Hand, HandFrame, Tuning   # noqa: E402
-from kinesis.ui.hand_control import HandControl          # noqa: E402
+from kinesis.canvas.scene import BoardScene  # noqa: E402
+from kinesis.canvas.view import BoardView  # noqa: E402
+from kinesis.tracking.protocol import Hand, HandFrame, Tuning  # noqa: E402
+from kinesis.ui.hand_control import HandControl  # noqa: E402
 
 
 @pytest.fixture(scope="module")

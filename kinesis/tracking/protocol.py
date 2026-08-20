@@ -6,7 +6,7 @@ an optional small JPEG when the debug preview is switched on.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -69,14 +69,14 @@ class Tuning:
 
     preview: bool = False                # send JPEG frames for the PIP
 
-    def replace(self, **kw) -> "Tuning":
+    def replace(self, **kw) -> Tuning:
         return replace(self, **kw)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Tuning":
+    def from_dict(cls, data: dict) -> Tuning:
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**known)
 

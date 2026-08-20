@@ -246,7 +246,7 @@ class HandControl(QObject):
         # Released over the bin: delete the image it was holding.
         if entry is not None and self.view.is_over_trash(QPointF(cursor.x, cursor.y)):
             item = entry[0]
-            for label in [l for l, (it, _) in list(self._grabs.items()) if it is item]:
+            for label in [lab for lab, (it, _) in list(self._grabs.items()) if it is item]:
                 self._grabs.pop(label, None)
                 other = self.cursors.get(label)
                 if other is not None:
@@ -335,7 +335,7 @@ class HandControl(QObject):
         if state is None:
             return
         item = state["item"]
-        remaining = [l for l in state["labels"] if l != released]
+        remaining = [lab for lab in state["labels"] if lab != released]
         for label in remaining:
             cursor = self.cursors.get(label)
             if cursor is None or not cursor.pinching:

@@ -13,10 +13,13 @@ dependencies = [
     # <5: mediapipe 0.10.x is built against the cv2 4.x line.
     "opencv-python>=4.10,<5",
     "numpy>=2.0",
+    # kinesis/mcp_server.py ships in the package and imports it; the import
+    # sweep in ./run.sh check is what noticed it was only ever installed by hand.
+    "mcp>=2,<3",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.16"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -27,3 +30,18 @@ include = ["kinesis*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Lint only -- no formatter. Nothing here rewrites code that already reads fine;
+# the job is catching dead imports, unsorted imports and real mistakes.
+[tool.ruff]
+line-length = 100        # what the code was already written to; 88 flagged 52 lines
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    # zip(..., strict=): most zips here are the pairwise zip(xs, xs[1:]) idiom,
+    # where strict is meaningless, and the two over MediaPipe results would turn
+    # a lint into a raise inside the tracker loop. Noise, so it is off.
+    "B905",
+]

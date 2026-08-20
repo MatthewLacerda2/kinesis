@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from .control import ControlServer
 from .canvas.persistence import load_scene, save_scene
 from .canvas.scene import BoardScene
 from .canvas.view import BoardView
+from .control import ControlServer
 from .ui.camera_feed import CameraFeed
 from .ui.hand_control import HandControl
 from .ui.tuning import TuningPanel, load_tuning, save_tuning
@@ -79,7 +79,8 @@ class MainWindow(QMainWindow):
         menu = self.menuBar()
 
         file_menu = menu.addMenu("&File")
-        file_menu.addAction(self._act("&Open Scene…", QKeySequence.StandardKey.Open, self.open_scene))
+        file_menu.addAction(
+            self._act("&Open Scene…", QKeySequence.StandardKey.Open, self.open_scene))
         file_menu.addAction(self._act("&Save Scene", QKeySequence.StandardKey.Save, self.save))
         file_menu.addAction(self._act("Save Scene &As…", "Ctrl+Shift+S", self.save_as))
         file_menu.addAction(self._act("Save &Packed…", "Ctrl+Shift+P", self.save_packed))

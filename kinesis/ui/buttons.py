@@ -13,7 +13,7 @@ fourth near-identical `is_over_x`.
 
 from __future__ import annotations
 
-from typing import Container
+from collections.abc import Container
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
