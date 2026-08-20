@@ -11,7 +11,7 @@ import math
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene
 
@@ -81,7 +81,8 @@ class BoardScene(QGraphicsScene):
         """Bounding box of everything on the board -- what Ctrl+0 and fit frame."""
         rect = QRectF()
         for item in self.board_items():
-            rect = item.sceneBoundingRect() if rect.isNull() else rect.united(item.sceneBoundingRect())
+            box = item.sceneBoundingRect()
+            rect = box if rect.isNull() else rect.united(box)
         return rect
 
     # ---------- mutation ----------

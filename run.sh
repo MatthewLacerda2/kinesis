@@ -3,6 +3,7 @@
 #   ./run.sh          launch the app          (available from M1)
 #   ./run.sh m0       M0 pinch check          (add --preview for a camera window)
 #   ./run.sh test     pytest
+#   ./run.sh check    every gate: lint, import sweep, tests (pre-push)
 #   ./run.sh setup    just do the setup and stop
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -40,6 +41,38 @@ cmd="${1:-app}"
 case "$cmd" in
   m0)    exec "$PY" scripts/m0_pinch_check.py "$@" ;;
   test)  exec "$PY" -m pytest "$@" ;;
+  check)
+    # Every gate the project claims to pass, in one command -- because "I ran the
+    # tests" and "I ran the tests AND checked imports" are a keystroke apart and
+    # feel identical afterwards. Each gate announces itself, all of them run even
+    # after one fails (a lint error should not hide a broken test), and the exit
+    # code is non-zero if any did. Adding a gate is one gate line.
+    gate_failed=0
+    gate() {
+      name="$1"; shift
+      echo
+      echo "[check] --- $name"
+      if "$@"; then
+        echo "[check] ok: $name"
+      else
+        echo "[check] FAILED: $name" >&2
+        gate_failed=1
+      fi
+    }
+
+    gate "ruff -- lint and import order" "$PY" -m ruff check .
+    # Conventions linter (file size, module docstrings) lands in #17:
+    # gate "conventions" "$PY" scripts/conventions_lint.py
+    gate "import sweep -- every module in the package imports" "$PY" scripts/import_sweep.py
+    gate "pytest -- the full suite" "$PY" -m pytest
+
+    echo
+    if [ "$gate_failed" -ne 0 ]; then
+      echo "[check] one or more gates failed." >&2
+      exit 1
+    fi
+    echo "[check] all gates green."
+    ;;
   setup) echo "[kinesis] setup complete." ;;
   app)
     if [ -f kinesis/__main__.py ]; then
@@ -49,5 +82,5 @@ case "$cmd" in
     echo "          For the M0 checkpoint run:  ./run.sh m0 --preview"
     exit 1
     ;;
-  *) echo "usage: ./run.sh [app|m0|test|setup]" >&2; exit 2 ;;
+  *) echo "usage: ./run.sh [app|m0|test|check|setup]" >&2; exit 2 ;;
 esac
