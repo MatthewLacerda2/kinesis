@@ -100,6 +100,20 @@ side effect of a feature PR.
   scale, no rotation, no corner handles, trash target bottom-right. `Alt`+drag
   is the mouse equivalent of a scale, so the app stays fully usable with the
   camera off — and **it starts with tracking off.**
+- **A grab claims the board** (#49). While one hand holds an image, that image
+  is the only thing either hand can act on: the second hand joins the scale
+  from wherever it is rather than having to land on the picture, and it cannot
+  pick up a different one. Two hands on two images was given up for this on
+  purpose. Scaling pivots on a point fixed *in the picture* — the holding hand
+  when that hand is on it, the image's centre when it is not — because a pivot
+  out in empty canvas throws the image across the board as it grows.
+- **A fist on empty canvas moves the selected image** (#49), by the hand's
+  delta rather than teleporting it to the hand. It is gated on something being
+  selected because it takes over the two-fist pan/zoom, and **a second fist on
+  empty canvas hands the board back**: the selection drops, the image stays
+  where it got to, pan/zoom resumes. That handoff is load-bearing — it is the
+  only way to clear a selection by hand, and without it the gate shuts for good
+  after the first grab and hand pan/zoom is gone.
 - **A closed hand is the grab verb; a pinch is a second spelling of it** (#34).
   Either latches a grab and either holds one, and nothing downstream branches on
   which. The fist is primary because it is the measurement that survives a
@@ -154,9 +168,11 @@ up front so setup fails loudly rather than mid-capture. `kinesis/canvas/` —
 `view.py` (mouse/keyboard interaction), `chrome.py` (all canvas painting --
 trash target, camera button, toolbar, cursors, HUD), `persistence.py`
 (`.kinesis` save/load). `kinesis/ui/` — `hand_control.py`
-(tracker lifetime, the 60 Hz timer, the grab state machine), `overlay.py`
-(preview/cursors/HUD), `tuning.py` (the `T` panel), `camera_feed.py` (background
-capture). `kinesis/app.py` is the window and the wiring; `kinesis/control.py` is
+(tracker lifetime, the 60 Hz timer, the grab state machine),
+`canvas_gesture.py` (two fists on empty canvas pan and zoom the view -- the one
+hand gesture that touches no item, which is why it is not in the state
+machine), `overlay.py` (preview/cursors/HUD), `tuning.py` (the `T` panel),
+`camera_feed.py` (background capture). `kinesis/app.py` is the window and the wiring; `kinesis/control.py` is
 the control channel; `kinesis/mcp_server.py` is a thin client of it.
 
 **The dependency direction that must not invert:** `tracking/` never imports

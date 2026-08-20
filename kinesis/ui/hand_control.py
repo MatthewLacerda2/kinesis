@@ -17,6 +17,7 @@ from PySide6.QtCore import QObject, QPointF, QTimer, Signal
 from ..canvas.items import ImageItem
 from ..tracking.protocol import HandFrame, SetTuning, Stop, TrackerStatus, Tuning
 from ..tracking.worker import start_tracker
+from .canvas_gesture import CanvasGesture
 
 # 120Hz: the camera is capped at 30fps, but ticking faster cuts the wait
 # between a frame arriving and it reaching the screen (and matches ProMotion).
@@ -62,7 +63,9 @@ class HandControl(QObject):
         # Set while both hands pinch the same image; captured at the transition
         # frame so joining or leaving the second hand never jumps the image.
         self._two_hand: dict | None = None
-        self._canvas_gesture: dict | None = None
+        # Labels holding an image they never closed on -- see _begin_grab.
+        self._fallback: set[str] = set()
+        self.canvas_gesture = CanvasGesture(view)
 
         self.timer = QTimer(self)
         self.timer.setInterval(int(1000 / UI_HZ))
@@ -222,15 +225,26 @@ class HandControl(QObject):
     def _begin_grab(self, cursor: Cursor) -> None:
         scene_pos = self._scene_pos(cursor)
 
-        # Second hand pinching an image the other hand already holds: promote to
-        # a two-hand scale rather than starting an independent grab.
+        # A grab claims the board: while one hand holds an image, that image is
+        # the only thing either hand can act on. So the second hand joins the
+        # scale from wherever it happens to be, instead of having to find the
+        # picture first -- two hands on one image was the common case, and
+        # making the second hand hunt for a target it already knows was work
+        # the gesture was asking for no reason.
         for other_label, (item, _) in list(self._grabs.items()):
             if other_label == cursor.label:
                 continue
-            if self._hits(item, scene_pos):
-                self._begin_two_hand(other_label, cursor.label, item)
-                cursor.grabbing = True
-                return
+            if other_label in self._fallback and not self._hits(item, scene_pos):
+                # The other hand only picked this up because it was selected,
+                # and this one closed on nothing too. Two fists on empty canvas
+                # means the board, so hand off -- leaving the image where it
+                # got to rather than snapping it back, which would be a jump
+                # nobody asked for.
+                self._end_fallback_grab(other_label)
+                break
+            self._begin_two_hand(other_label, cursor.label, item)
+            cursor.grabbing = True
+            return
 
         held = {item for item, _ in self._grabs.values()}
         # Images only: a pinch moves and scales a picture. What a hand does to a
@@ -248,11 +262,48 @@ class HandControl(QObject):
                 return
 
         cursor.grabbing = False
+
+        # Nothing under the hand: a fist means the selected image, wherever it
+        # is. The offset is captured the same way as a real grab, so the image
+        # moves by however far the hand moves instead of teleporting to it --
+        # this is a fist closing on empty canvas, and a picture that jumped
+        # across the board every time one did would be unusable.
+        selected = self._selected_image()
+        if selected is not None and not self._grabs:
+            self._grabs[cursor.label] = (selected, selected.pos() - scene_pos)
+            self._fallback.add(cursor.label)
+            cursor.grabbing = True
+            return
+
         # Both hands pinching empty canvas: pan and zoom the view instead.
         others = [c for c in self.cursors.values()
                   if c is not cursor and c.pinching and not c.grabbing]
         if others and not self._grabs:
-            self._begin_canvas_gesture(others[0], cursor)
+            self.canvas_gesture.begin(others[0], cursor)
+
+    def _selected_image(self) -> ImageItem | None:
+        """The image a fist means when it closes on nothing.
+
+        Frontmost wins when several are selected: the board has no notion of
+        an ordering over a multi-selection, and the one on top is the one the
+        user last put there.
+        """
+        chosen = [i for i in self.board.selectedItems() if isinstance(i, ImageItem)]
+        return max(chosen, key=lambda i: i.zValue()) if chosen else None
+
+    def _end_fallback_grab(self, label: str) -> None:
+        """Give an image picked up off-target back, and clear the selection.
+
+        Dropping the selection is the point: while something is selected a fist
+        on empty canvas means *move it*, so this is the only way back to a
+        canvas gesture without reaching for the mouse.
+        """
+        self._grabs.pop(label, None)
+        self._fallback.discard(label)
+        cursor = self.cursors.get(label)
+        if cursor is not None:
+            cursor.grabbing = False
+        self.board.clearSelection()
 
     def _end_grab(self, cursor: Cursor, opened: bool = True) -> None:
         """End a grab. `opened` is False when the hand vanished rather than let go.
@@ -268,6 +319,7 @@ class HandControl(QObject):
             item = entry[0]
             for label in [lab for lab, (it, _) in list(self._grabs.items()) if it is item]:
                 self._grabs.pop(label, None)
+                self._fallback.discard(label)
                 other = self.cursors.get(label)
                 if other is not None:
                     other.grabbing = False
@@ -282,15 +334,17 @@ class HandControl(QObject):
         if self._two_hand and cursor.label in self._two_hand["labels"]:
             self._end_two_hand(released=cursor.label)
         self._grabs.pop(cursor.label, None)
+        self._fallback.discard(cursor.label)
         cursor.grabbing = False
         cursor.pinching = False
-        if self._canvas_gesture and cursor.label in self._canvas_gesture["labels"]:
-            self._canvas_gesture = None
+        if self.canvas_gesture.holds(cursor.label):
+            self.canvas_gesture.clear()
 
     def _release_all(self) -> None:
         self._grabs.clear()
+        self._fallback.clear()
         self._two_hand = None
-        self._canvas_gesture = None
+        self.canvas_gesture.clear()
         for cursor in self.cursors.values():
             cursor.grabbing = False
             cursor.pinching = False
@@ -312,22 +366,27 @@ class HandControl(QObject):
     def _begin_two_hand(self, label_a: str, label_b: str, item: ImageItem) -> None:
         ca, cb = self.cursors[label_a], self.cursors[label_b]
         pa, pb = self._scene_pos(ca), self._scene_pos(cb)
-        mid = QPointF((pa.x() + pb.x()) / 2, (pa.y() + pb.y()) / 2)
         self._two_hand = {
             "item": item,
             "labels": (label_a, label_b),
             # Reference state captured at the transition frame, so the image
             # does not jump at the moment the second hand joins.
             "ref_dist": max(1e-6, math.hypot(pb.x() - pa.x(), pb.y() - pa.y())),
-            "ref_mid": mid,
+            "ref_a": pa,
+            # Scaling pivots on the holding hand when that hand is on the
+            # picture, and on the image's own centre when it isn't -- which is
+            # the case for a hand that picked the image up off-target. Either
+            # way the pivot is a point of the image, never one out in empty
+            # canvas, because a pivot out there throws the image across the
+            # board as it grows.
+            "piv": pa if self._hits(item, pa) else item.pos(),
             "p0": item.pos(),
             "s0": item.scale(),
         }
         self._grabs[label_b] = (item, item.pos() - pb)
 
     def _sync_two_hand(self) -> None:
-        if self._canvas_gesture is not None:
-            self._update_canvas_gesture()
+        self.canvas_gesture.update(self.cursors)
         if self._two_hand is None:
             return
         state = self._two_hand
@@ -339,14 +398,18 @@ class HandControl(QObject):
         pa, pb = self._scene_pos(ca), self._scene_pos(cb)
         dist = math.hypot(pb.x() - pa.x(), pb.y() - pa.y())
         f = max(0.02, dist / state["ref_dist"])
-        mid = QPointF((pa.x() + pb.x()) / 2, (pa.y() + pb.y()) / 2)
 
         item = state["item"]
         item.setScale(max(1e-4, state["s0"] * f))
-        # Scale about the pinch midpoint, and follow it, so the image both
-        # resizes and moves with the hands.
-        item.setPos(mid.x() + (state["p0"].x() - state["ref_mid"].x()) * f,
-                    mid.y() + (state["p0"].y() - state["ref_mid"].y()) * f)
+        # The holding hand carries the image and the second hand only sizes it:
+        # the image translates by that hand's movement, and scales about a
+        # pivot fixed in the picture (see _begin_two_hand). The midpoint
+        # between the hands used to be the pivot, which was the same thing
+        # while both hands were on the picture -- and the second hand can now
+        # join from anywhere.
+        ref_a, piv, p0 = state["ref_a"], state["piv"], state["p0"]
+        item.setPos(piv.x() + (pa.x() - ref_a.x()) - (piv.x() - p0.x()) * f,
+                    piv.y() + (pa.y() - ref_a.y()) - (piv.y() - p0.y()) * f)
 
     def _end_two_hand(self, released: str) -> None:
         """One hand let go: hand back to a single-hand drag with no jump."""
@@ -363,36 +426,3 @@ class HandControl(QObject):
                 continue
             # Recompute the offset from where the image actually is now.
             self._grabs[label] = (item, item.pos() - self._scene_pos(cursor))
-
-    # ---------- two-hand canvas pan/zoom ----------
-
-    def _begin_canvas_gesture(self, ca: Cursor, cb: Cursor) -> None:
-        mid_vp = QPointF((ca.x + cb.x) / 2, (ca.y + cb.y) / 2)
-        self._canvas_gesture = {
-            "labels": (ca.label, cb.label),
-            "ref_dist": max(1e-6, math.hypot(cb.x - ca.x, cb.y - ca.y)),
-            "ref_scene": self.view.mapToScene(int(mid_vp.x()), int(mid_vp.y())),
-            "ref_zoom": self.view.transform().m11(),
-        }
-
-    def _update_canvas_gesture(self) -> None:
-        state = self._canvas_gesture
-        label_a, label_b = state["labels"]
-        ca, cb = self.cursors.get(label_a), self.cursors.get(label_b)
-        if ca is None or cb is None or not (ca.pinching and cb.pinching):
-            self._canvas_gesture = None
-            return
-
-        dist = math.hypot(cb.x - ca.x, cb.y - ca.y)
-        zoom = state["ref_zoom"] * (dist / state["ref_dist"])
-        zoom = max(0.02, min(64.0, zoom))
-
-        self.view.resetTransform()
-        self.view.scale(zoom, zoom)
-
-        # Keep the scene point that was under the midpoint pinned to the midpoint.
-        mid_vp = QPointF((ca.x + cb.x) / 2, (ca.y + cb.y) / 2)
-        vp_center = self.view.viewport().rect().center()
-        ref = state["ref_scene"]
-        self.view.centerOn(ref.x() - (mid_vp.x() - vp_center.x()) / zoom,
-                           ref.y() - (mid_vp.y() - vp_center.y()) / zoom)
