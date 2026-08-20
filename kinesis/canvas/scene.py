@@ -128,6 +128,34 @@ class BoardScene(QGraphicsScene):
         self.board_changed.emit()
         return True
 
+    def describe_image(self, item: ImageItem | str, description: str) -> ImageItem | None:
+        """Record what an image is. Returns None when no item has that id.
+
+        The board only stores the text -- it has no way to produce one, and is
+        not allowed to acquire one, so whoever is driving does the looking. An
+        empty (or whitespace-only) description clears the field back to "nobody
+        has looked at this yet", which is how a wrong reading gets taken back
+        rather than being stuck on the image forever.
+        """
+        target = self.find(item) if isinstance(item, str) else item
+        if target is None:
+            return None
+        target.description = description.strip()
+        self.board_changed.emit()
+        return target
+
+    def search(self, query: str) -> list[tuple[ImageItem, str]]:
+        """Images matching `query`, each with the field it matched on.
+
+        In z-order like every other listing, and description hits come out ahead
+        of file-name hits: a caller acting on the first result should get the
+        image something actually read, not the one whose file happens to be
+        named after it.
+        """
+        hits = [(item, field) for item in self.image_items()
+                if (field := item.matches(query)) is not None]
+        return sorted(hits, key=lambda hit: hit[1] != "description")
+
     def clear_board(self) -> int:
         """Empty the board -- every item, not just the images. Returns how many."""
         items = self.board_items()
@@ -141,6 +169,7 @@ class BoardScene(QGraphicsScene):
         if not item.source_path:
             return None  # pasted images have no path to re-read; skipped for now
         clone = ImageItem(item.source_path)
+        clone.description = item.description  # same picture, so the same reading of it
         clone.setScale(item.scale())
         clone.setRotation(item.rotation())
         self.addItem(clone)

@@ -176,13 +176,95 @@ def test_list_images_describes_every_image_in_z_order(control, make_image):
     images = send(control, "list_images")["images"]
     assert [i["id"] for i in images] == ids
     first = images[0]
-    assert set(first) == {"id", "path", "x", "y", "scale", "width", "height", "z"}
+    assert set(first) == {"id", "path", "description", "x", "y", "scale",
+                          "width", "height", "z"}
     assert (first["width"], first["height"]) == (400, 300)
     assert first["scale"] > 0
 
 
 def test_list_images_on_an_empty_board(control):
     assert send(control, "list_images") == {"images": [], "ok": True}
+
+
+# ---------- descriptions ----------
+
+def test_a_new_image_is_listed_as_having_no_description(control, make_image):
+    """The signal the whole feature rests on: empty means nobody has looked.
+
+    A caller decides what to spend a vision pass on by reading this field, so an
+    image that arrived by drag-drop must come back empty rather than helpfully
+    pre-filled with its file name.
+    """
+    send(control, "add_image", path=str(make_image("kettle.png")))
+    assert send(control, "list_images")["images"][0]["description"] == ""
+
+
+def test_a_description_is_written_and_read_back(control, make_image):
+    item_id = send(control, "add_image", path=str(make_image()))["id"]
+    reply = send(control, "describe_image", id=item_id, description="a copper kettle")
+    assert reply == {"described": True, "id": item_id,
+                     "description": "a copper kettle", "ok": True}
+    assert send(control, "list_images")["images"][0]["description"] == "a copper kettle"
+
+
+def test_a_description_can_be_overwritten_and_cleared(control, make_image):
+    """A wrong reading must never be stuck on an image nobody can reach."""
+    item_id = send(control, "add_image", path=str(make_image()))["id"]
+    send(control, "describe_image", id=item_id, description="a teapot")
+    send(control, "describe_image", id=item_id, description="a kettle")
+    assert send(control, "list_images")["images"][0]["description"] == "a kettle"
+    assert send(control, "describe_image", id=item_id, description="")["description"] == ""
+    assert send(control, "list_images")["images"][0]["description"] == ""
+
+
+def test_describing_an_id_that_is_not_there_says_so(control):
+    assert send(control, "describe_image", id="nope", description="x") == {
+        "described": False, "ok": True}
+
+
+def test_find_images_matches_a_description_and_names_the_field(control, make_image):
+    described = send(control, "add_image", path=str(make_image("a.png")))["id"]
+    send(control, "add_image", path=str(make_image("b.png")))
+    send(control, "describe_image", id=described, description="A copper kettle, steaming")
+
+    matches = send(control, "find_images", query="KETTLE")["matches"]
+    assert [m["id"] for m in matches] == [described], "case-insensitive, and only the hit"
+    assert matches[0]["matched"] == "description"
+
+
+def test_find_images_tells_a_read_image_apart_from_a_lucky_file_name(control, make_image):
+    """Both can match; a caller has to know which kind of answer it got.
+
+    A file-name hit is a guess about an image nobody has looked at. Reporting it
+    as if it were a description would put the filename back in the one field
+    that exists to not contain one -- and description hits sort first, so acting
+    on the first result acts on the image something actually read.
+    """
+    guessed = send(control, "add_image", path=str(make_image("kettle-photo.png")))["id"]
+    read = send(control, "add_image", path=str(make_image("img_204.png")))["id"]
+    send(control, "describe_image", id=read, description="a kettle on a stove")
+
+    matches = send(control, "find_images", query="kettle")["matches"]
+    assert [(m["id"], m["matched"]) for m in matches] == [
+        (read, "description"), (guessed, "path")]
+    assert matches[1]["description"] == "", "a path hit is still an undescribed image"
+
+
+def test_find_images_never_treats_an_empty_description_as_a_wildcard(control, make_image):
+    """Undescribed is a state, not a match-everything.
+
+    Clearing a description has to put the image back exactly where an untouched
+    one is, or "described as nothing" quietly becomes a third state that matches
+    every query there is.
+    """
+    item_id = send(control, "add_image", path=str(make_image("img_9.png")))["id"]
+    send(control, "describe_image", id=item_id, description="a kettle")
+    send(control, "describe_image", id=item_id, description="   ")
+
+    assert send(control, "find_images", query="kettle")["matches"] == []
+    assert send(control, "find_images", query="")["matches"] == []
+    assert send(control, "find_images", query="   ")["matches"] == []
+    assert send(control, "list_images")["images"][0]["description"] == ""
 
 
 def test_fit_frames_the_content(control, make_image):

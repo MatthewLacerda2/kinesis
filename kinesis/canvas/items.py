@@ -105,6 +105,13 @@ class ImageItem(QGraphicsItem):
 
     boundingRect is always in *source pixels*, independent of which pixmap is
     currently resident, so swapping preview <-> full res never moves anything.
+
+    `description` is free text nobody on this side of the screen ever sees: it
+    is written by whatever is driving the board over MCP, once, after looking at
+    the picture. It starts empty and empty is meaningful -- it says nobody has
+    looked yet, which is why nothing here ever defaults it to the file name. A
+    filename sitting in this field would be indistinguishable from an actual
+    reading of the image, and telling those apart is the whole point of it.
     """
 
     def __init__(self, path: str | None, image: QImage | None = None,
@@ -112,6 +119,7 @@ class ImageItem(QGraphicsItem):
         super().__init__()
         self.item_id = item_id or uuid.uuid4().hex[:12]
         self.source_path = str(path) if path else None
+        self.description = ""
 
         self._full: QPixmap | None = None
         self._full_failed = False
@@ -257,12 +265,36 @@ class ImageItem(QGraphicsItem):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(rect)
 
+    # ---------- search ----------
+
+    def matches(self, query: str) -> str | None:
+        """Which field a search for `query` hit: "description", "path" or None.
+
+        Case-insensitive substring, and the *which* is returned rather than a
+        bare yes: a description hit is something that looked at this image and
+        wrote down what it saw, a file-name hit is a guess about an image nobody
+        has read yet. A caller that cannot tell the two apart is back to trusting
+        file names, so the distinction survives all the way out to the reply.
+
+        An empty description matches nothing, including an empty query -- "not
+        looked at yet" is a state, never a wildcard.
+        """
+        needle = query.strip().lower()
+        if not needle:
+            return None
+        if needle in self.description.lower():
+            return "description"
+        if self.source_path and needle in Path(self.source_path).name.lower():
+            return "path"
+        return None
+
     # ---------- persistence ----------
 
     def to_dict(self) -> dict:
         return {
             "id": self.item_id,
             "path": self.source_path,
+            "description": self.description,
             "x": self.pos().x(),
             "y": self.pos().y(),
             "scale": self.scale(),
