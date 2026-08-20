@@ -149,8 +149,10 @@ capture). `kinesis/app.py` is the window and the wiring; `kinesis/control.py` is
 the control channel; `kinesis/mcp_server.py` is a thin client of it.
 
 **The dependency direction that must not invert:** `tracking/` never imports
-from `canvas/` or `ui/`, and nothing outside `tracking/worker.py` imports
-MediaPipe. `gestures.py` and `filters.py` additionally never import Qt.
+from `canvas/` or `ui/`, and nothing outside `tracking/worker.py` and
+`tracking/model.py` imports MediaPipe. `gestures.py` and `filters.py` additionally never import Qt. These
+are checked, not remembered: `scripts/lint/architecture.py` runs in
+`./run.sh check`, and adding an invariant there is adding a row to `RULES`.
 
 ## How we work
 
@@ -245,15 +247,13 @@ them is the whole of the claim that work is finished.*
      `.venv/bin/python -c "import kinesis, kinesis.app, …"` catches a circular
      import that the tests, which avoid Qt, will not.
   Verify before asserting: if a gate wasn't run, say it wasn't run.
-- **Size gate: source files ≤ 300 lines of code, test files ≤ 150.** Blank and
-  comment lines do not count — the house style is to explain the *why* in module
-  docstrings, and a cap that counted prose would put those two rules in
-  opposition. **Group by subfolder, not filename prefix.** This is currently a
-  review-time rule with nothing enforcing it; automating it is `infrastructure`
-  work. **One file is over the line today:** `canvas/view.py` at 397. Nothing is
-  grandfathered — a file over the limit gets split, not excused — so that is a
-  standing item, and the natural seam is that view.py currently holds both the
-  input handling and all the canvas painting.
+- **Size gate: source files ≤ 300 lines of code, test files ≤ 250.** Blank
+  lines, `#` comments and docstrings do not count — the house style is to
+  explain the *why* in module docstrings, and a cap that counted prose would put
+  those two rules in opposition. **Group by subfolder, not filename prefix.**
+  `scripts/lint/size.py` counts it off the AST and `./run.sh check` runs it, so
+  "lines of code" is one number rather than one per person who measures. Nothing
+  is grandfathered — a file over the limit gets split, not excused.
 - **Agent velocity is first-class.** Agents drive this repo. Write code that is
   readable by design and lean — clear code is cheaper to reason about and faster
   for the next agent to extend. This is part of **Craft**, not a trade-off
@@ -277,7 +277,10 @@ them is the whole of the claim that work is finished.*
 - **Docstrings on MCP tools and control commands are an agent-facing surface**,
   and they are the only documentation of it. Every tool and every argument
   describes itself, in the terms a caller would use rather than the terms the
-  implementation uses. Adding a tool without one is incomplete work.
+  implementation uses. Adding a tool without one is incomplete work, and
+  `scripts/lint/agent_docs.py` fails the build over it — for a control command
+  the arguments it wants named are the JSON keys the handler reads out of the
+  request, not the parameter called `request`.
 - **There is no backwards compatibility for `.kinesis` files, and that is the
   policy until the user says otherwise.** No migrations, no reading an older
   `FORMAT_VERSION`, no field kept alive because something might still write it.

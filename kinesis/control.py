@@ -93,11 +93,20 @@ class ControlServer(QObject):
     # ---------- commands ----------
 
     def cmd_ping(self, _request: dict) -> dict:
+        """Liveness check: is the board there, and what is on it?
+
+        Takes no keys. Answers with the number of images and whether the webcam
+        background is on.
+        """
         return {"images": len(self.board.image_items()),
                 "background": self.window.camera_bg.active}
 
     def cmd_set_background(self, request: dict) -> dict:
-        """Webcam background on/off; omitting "enabled" toggles it."""
+        """Turn the webcam background on or off.
+
+        enabled: true for the camera feed, false for the plain dark board.
+        Leave the key out entirely to flip whichever way it currently is.
+        """
         enabled = request.get("enabled")
         if enabled is None:
             active = self.window.toggle_background()
@@ -108,12 +117,24 @@ class ControlServer(QObject):
         return {"enabled": active}
 
     def cmd_add_image(self, request: dict) -> dict:
+        """Add one image file to the board.
+
+        path: absolute path to a png, jpg, webp, gif, bmp or tiff file. A path
+        that cannot be read comes back as an error rather than an empty item.
+
+        Answers with the new item's id, which is what cmd_remove_image takes.
+        """
         item = self.board.add_image(request["path"])
         self.window.statusBar().showMessage(
             f"MCP added {Path(item.source_path).name}", 3000)
         return {"id": item.item_id, "path": item.source_path}
 
     def cmd_add_images(self, request: dict) -> dict:
+        """Add several image files at once, then fit the view around them.
+
+        paths: list of absolute image paths. One bad path does not sink the
+        batch -- it comes back under "failed" while the rest are added.
+        """
         added, failed = [], []
         for path in request.get("paths", []):
             try:
@@ -127,6 +148,11 @@ class ControlServer(QObject):
         return {"added": added, "failed": failed}
 
     def cmd_remove_image(self, request: dict) -> dict:
+        """Take one image off the board.
+
+        id: the item id from cmd_list_images. Answers with "removed": false if
+        nothing on the board has that id.
+        """
         removed = self.board.remove_image(request["id"])
         return {"removed": removed}
 
@@ -157,6 +183,10 @@ class ControlServer(QObject):
         return {"images": images}
 
     def cmd_fit(self, _request: dict) -> dict:
+        """Zoom the board out until everything on it is visible at once.
+
+        Takes no keys.
+        """
         self.window.view.zoom_to_fit()
         return {}
 
