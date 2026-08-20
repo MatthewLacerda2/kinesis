@@ -80,10 +80,16 @@ def frame(*hands):
     ])
 
 
-def test_defaults_are_tightened():
+def test_pinch_defaults_are_in_metric_units():
+    """The thresholds gate a metric ratio now, so they carry no old value.
+
+    18 mm between the fingertip landmarks is finger pads touching, on a palm
+    that measures about 95 mm: the trigger has to sit just above that or the
+    pinch cannot be made at all.
+    """
     t = Tuning()
-    assert t.pinch_close == pytest.approx(0.144)
-    assert t.pinch_open == pytest.approx(0.216)
+    assert t.pinch_close == pytest.approx(0.20)
+    assert 0.018 / 0.095 < t.pinch_close < 0.25
     # The band keeps its 1.5x shape, so hysteresis is as flicker-resistant as before.
     assert t.pinch_open / t.pinch_close == pytest.approx(1.5)
 
