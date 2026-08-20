@@ -64,6 +64,17 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
     data = json.loads(path.read_text())
     if data.get("format") != "kinesis":
         raise ValueError(f"{path} is not a .kinesis scene")
+    # There are no migrations, by policy, so the only safe thing a build can do
+    # with a version it does not write is refuse it -- loudly, and before the
+    # board is cleared. Reading it anyway is how a renamed or repurposed field
+    # becomes a board that loads wrong and quietly stays wrong, which is the
+    # whole reason the version bump is mandatory.
+    version = data.get("version")
+    if version != FORMAT_VERSION:
+        raise ValueError(
+            f"{path} is format version {version!r}; this build only reads "
+            f"version {FORMAT_VERSION}, and there is no migration path"
+        )
 
     scene.clear_board()
     loaded, missing = 0, []
