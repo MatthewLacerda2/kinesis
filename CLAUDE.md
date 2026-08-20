@@ -138,11 +138,12 @@ side effect of a feature PR.
 
 `kinesis/tracking/` — `filters.py` and `gestures.py` are pure and depend on
 nothing but `protocol.py`; `worker.py` is the tracker process entry and is the
-only module that touches MediaPipe; `model.py` locates/downloads the landmarker
+only module that runs MediaPipe inference; `model.py` locates/downloads the landmarker
 up front so setup fails loudly rather than mid-capture. `kinesis/canvas/` —
 `scene.py` (the one mutation surface), `items.py` (`ImageItem` + LOD),
-`view.py` (mouse/keyboard interaction and all canvas painting),
-`persistence.py` (`.kinesis` save/load). `kinesis/ui/` — `hand_control.py`
+`view.py` (mouse/keyboard interaction), `chrome.py` (all canvas painting --
+trash target, camera button, toolbar, cursors, HUD), `persistence.py`
+(`.kinesis` save/load). `kinesis/ui/` — `hand_control.py`
 (tracker lifetime, the 60 Hz timer, the grab state machine), `overlay.py`
 (preview/cursors/HUD), `tuning.py` (the `T` panel), `camera_feed.py` (background
 capture). `kinesis/app.py` is the window and the wiring; `kinesis/control.py` is
@@ -156,18 +157,32 @@ are checked, not remembered: `scripts/lint/architecture.py` runs in
 
 ## How we work
 
-**Where this is developed.** One machine, one person: a MacBook with an M4, on
-macOS. That is a current fact and not a decided invariant, but it is the premise
-several rules below are shaped by, and it is written down so nobody re-derives
+**Where this is developed, and what it targets.** One machine, one person: a
+MacBook Air with an M4, on macOS. macOS on Apple Silicon is also the *target* --
+the user and the coworkers this is for are all on Macs -- which is why CI runs on
+`macos-latest`/arm64 rather than a cheaper Linux runner: a green Linux run would
+prove the Python sound and nothing about the machine the app runs on. Portability
+is a nice-to-have and nothing is owed to it. That is a current fact and not a
+decided invariant, but it is the premise several rules below are shaped by, and it is written down so nobody re-derives
 the industry default of many contributors on many cold machines and proposes the
 tooling that goes with it. Concretely: the camera is the built-in one at 30 fps,
 Apple Silicon is why the MediaPipe pin exists, and there is no second machine on
 which "works here" could be a separate claim from "works".
 
-**What does not exist yet, stated plainly so nobody writes rules against it:**
-there is no CI, no `make`, no linter config, and no lint gate. The GitHub repo is
-being created now. Until CI exists, *the gates below are run by hand, and running
-them is the whole of the claim that work is finished.*
+**The tooling that does exist**, so nobody rebuilds it: `./run.sh check` runs
+every mechanical gate in one command -- ruff, the conventions linter
+(`scripts/lint/`), an import sweep over every module, and pytest. A versioned
+pre-push hook runs the same command before a push leaves the machine, and CI runs
+it again on `macos-latest`/arm64 for any PR marked ready for review. There is
+still no `make` and none is wanted: `run.sh` is the entry point.
+
+**What is deliberately absent:** a formatter that rewrites code, and a dead-code
+detector. On the second -- it was measured, not assumed: 224 top-level
+definitions scanned, zero dead. `control.py` dispatches through
+`getattr(self, f"cmd_{command}")` and Qt calls its overrides by name, so a static
+detector reports those as dead and finds nothing real. Ruff's unused-import and
+unused-variable rules are the whole dead-code gate until the repo has code nobody
+remembers.
 
 - **The gates (push back before you build).** An idea becomes an issue only when
   all three hold; if any fails, **push back instead of complying**:
@@ -206,20 +221,26 @@ them is the whole of the claim that work is finished.*
   its subject. Lowercase-hyphenated, brief.
 - **One branch per issue, and merge one at a time.** Issues that block neither
   each other nor a common third can be worked in parallel, each on its own
-  branch. Merging is still serialized — rebase onto the latest `main`, re-run the
-  gates on the rebased state, merge, repeat. Two PRs that are each fine alone can
-  break the app together; nothing here proves otherwise automatically.
+  branch. Merging is still serialized — rebase onto the latest `main`, re-run
+  `./run.sh check` on the rebased state, merge, repeat. Two PRs that are each
+  fine alone can break the app together, and this is not theoretical: #23 and #24
+  were both green in isolation, and the moment they met, ruff rejected #23's
+  import formatting. Note *why* the rule survives having CI — the reason a
+  compiled project serializes merges is queue time, and that reason is gone here.
+  What remains is the semantic one, and a re-check now costs seconds, so skipping
+  it buys nothing.
   Worktrees are worth it when two branches are genuinely open at once and worth
   skipping when they are not — this is a 4,000-line Python project with no build
-  step, so the isolation buys correctness, not compile time.
+  step, so the isolation buys correctness, not compile time. Agents working
+  worktrees in parallel share the main repo's venv rather than building a 500 MB
+  one each; **verify `kinesis.__file__` resolves under the worktree before
+  trusting a green run**, or the gates graded the wrong tree (issue #28).
 - **Architecture- then infrastructure-first (NOT "make it up as we go").** When
   we find a problem — something that bites or will bite more than once, a pattern
   worth adopting, or a practice we should have had — we document it and fix it
   **before** continuing. Architecture and infrastructure problems **halt feature
   work.** Each such fix gets its own issue when it carries its own
-  responsibility. The obvious open item under this rule is that the gates are
-  unautomated; the first piece of infrastructure this repo earns is the one that
-  makes them runnable in one command.
+  responsibility.
 - **Dependencies (not batches).** Record how issues relate using GitHub's native
   **Blocked by / Blocks** relationships, and **sub-issues** when one issue is
   literal groundwork for another. There are no rigid batches: **the dependency
@@ -235,18 +256,20 @@ them is the whole of the claim that work is finished.*
   ago. The judgement about whether something is ready to be worked is made **when
   the label goes on**, or when it deliberately does not.
 - **Run the gates before claiming the work is finished.** They are:
-  1. **`./run.sh test`** — the full suite, currently 28 tests. Green, no
-     exceptions.
+  1. **`./run.sh check`** — ruff, the conventions linter, the import sweep and
+     the full suite. Green, no exceptions. (`./run.sh test` still runs pytest
+     alone, for the tight loop.)
   2. **`./run.sh` — actually launch it.** This is the gate that tests cannot be.
      Pinch feel, cursor lag and drop reliability are not assertable; the only
      honest check is a person using it. **Launch the app for the user rather than
      describing what should happen** — the loop that matters here is *change a
      number → relaunch → they try it*, and keeping that loop tight is worth more
      than any amount of careful explanation.
-  3. **Imports clean** for anything that moved between modules —
-     `.venv/bin/python -c "import kinesis, kinesis.app, …"` catches a circular
-     import that the tests, which avoid Qt, will not.
-  Verify before asserting: if a gate wasn't run, say it wasn't run.
+  Gate 1 already covers what used to be a third, hand-run gate: the import
+  sweep walks every module in the package and imports it, catching a circular
+  import that the tests, which avoid most of Qt, will not.
+  Verify before asserting: if a gate wasn't run, say it wasn't run. CI running
+  green is not a substitute for gate 2 — no runner can tell you a pinch landed.
 - **Size gate: source files ≤ 300 lines of code, test files ≤ 250.** Blank
   lines, `#` comments and docstrings do not count — the house style is to
   explain the *why* in module docstrings, and a cap that counted prose would put
@@ -285,8 +308,11 @@ them is the whole of the claim that work is finished.*
   policy until the user says otherwise.** No migrations, no reading an older
   `FORMAT_VERSION`, no field kept alive because something might still write it.
   There is one machine and one person, and no saved board anybody would mind
-  losing. **The version bump stays mandatory**: loading checks the format field,
-  so bumping is exactly what turns a silent misreading into a loud refusal. The
+  losing. **The version bump stays mandatory**: loading checks the format *and*
+  version fields — and refuses before clearing the board you already had — so
+  bumping is exactly what turns a silent misreading into a loud refusal. That
+  check was found missing and added in #23; the rule had been documented and
+  unenforced, which is the failure this file exists to prevent. The
   day the user has a board they can't afford to lose, this rule gets revisited —
   and that is their call, not a thing to infer.
 - **Nothing in the codebase is temporary**, except small JSON or log files.
