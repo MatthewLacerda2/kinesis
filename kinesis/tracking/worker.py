@@ -11,11 +11,16 @@ it open too means macOS picks one format for both, and the second client to
 open is the one that decides. Asking for the same size the background asks for
 is what keeps that harmless -- so the frames are watched and any other size is
 reported, rather than silently cropping the tracked field of view.
+
+Holding the camera also means this process must never outlive the UI: an orphan
+keeps the webcam light on with no window to explain it, and no way for a person
+to tell what is holding the device. So the parent is watched directly.
 """
 
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import queue
 import threading
 import time
@@ -33,6 +38,17 @@ MAX_BAD_READS = 60
 # spends about half a second reconfiguring a shared camera and pushes a few
 # odd-sized frames through on the way; only a size that outlives that is real.
 SHAPE_WARN_FRAMES = 15
+
+
+def _parent_gone(parent_pid: int) -> bool:
+    """True once the process that spawned us is gone.
+
+    `daemon=True` only covers the parent leaving through Python's own shutdown.
+    A crash, a Force Quit or a SIGTERM skips that, and the tracker is then an
+    orphan holding the camera open. Being reparented away from the spawning
+    process is the one signal common to all of those.
+    """
+    return os.getppid() != parent_pid
 
 
 def _publish(q: mp.Queue, item) -> None:
@@ -214,6 +230,7 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
         last_t = time.perf_counter()
         last_seq = -1
         first = True
+        parent_pid = os.getppid()
 
         with landmarker:
             while True:
@@ -229,7 +246,9 @@ def tracker_main(frames_q: mp.Queue, control_q: mp.Queue, tuning: Tuning) -> Non
                         engine.set_tuning(tuning)
                     elif isinstance(msg, Stop):
                         stop = True
-                if stop:
+                # Leaving on parent death uses the same exit as Stop, so the
+                # camera is released by one path rather than two.
+                if stop or _parent_gone(parent_pid):
                     break
 
                 # Take the freshest frame the capture thread has; never re-run
