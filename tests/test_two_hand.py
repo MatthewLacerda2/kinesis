@@ -191,3 +191,101 @@ def test_dropping_elsewhere_does_not_delete(rig):
     hc.latest = frame(("Right", *start, False))
     hc._tick()
     assert len(scene.image_items()) == 1
+
+
+def test_hand_that_leaves_releases_while_the_other_stays(rig):
+    """A departed hand must time out on its own clock, not the other hand's."""
+    scene, view, item, hc = rig
+    hc.tuning = hc.tuning.replace(lost_hold_ms=20.0)
+    left = canvas_xy(view, QPointF(-100, 0))
+    right = canvas_xy(view, QPointF(100, 0))
+
+    hc.latest = frame(("Right", *left, True))
+    hc._tick()
+    hc.latest = frame(("Right", *left, True), ("Left", *right, True))
+    hc._tick()
+    assert hc._two_hand is not None
+    scale_before = item.scale()
+
+    # Left walks out of frame; Right stays visible and keeps pinching.
+    hc.latest = frame(("Right", *left, True))
+    hc._tick()
+    time.sleep(0.05)
+    hc._tick()
+
+    assert "Left" not in hc._grabs
+    assert hc.cursors["Left"].pinching is False
+    assert hc._two_hand is None
+
+    # The one remaining hand drags; it must not scale against a ghost.
+    settle(hc, frame(("Right", *canvas_xy(view, QPointF(-300, 0)), True)))
+    assert item.scale() == pytest.approx(scale_before)
+
+
+def test_brief_dropout_of_one_hand_keeps_its_grab(rig):
+    """The hold window's original job: ride out a lost detection, not a departure."""
+    scene, view, item, hc = rig
+    left = canvas_xy(view, QPointF(-100, 0))
+    right = canvas_xy(view, QPointF(100, 0))
+
+    hc.latest = frame(("Right", *left, True))
+    hc._tick()
+    hc.latest = frame(("Right", *left, True), ("Left", *right, True))
+    hc._tick()
+    assert hc._two_hand is not None
+
+    # One frame without Left, well inside the default 300ms window.
+    hc.latest = frame(("Right", *left, True))
+    hc._tick()
+    assert "Left" in hc._grabs
+    assert hc._two_hand is not None
+
+    # Left comes back and the scale carries on from where it was.
+    settle(hc, frame(("Right", *canvas_xy(view, QPointF(-200, 0)), True),
+                     ("Left", *canvas_xy(view, QPointF(200, 0)), True)))
+    assert hc._two_hand is not None
+    assert item.scale() > 1.5
+
+
+def test_all_hands_vanishing_still_releases_everything(rig):
+    scene, view, item, hc = rig
+    hc.tuning = hc.tuning.replace(lost_hold_ms=20.0)
+    start = canvas_xy(view, QPointF(0, 0))
+    hc.latest = frame(("Right", *start, True))
+    hc._tick()
+    assert hc._grabs
+
+    hc.latest = frame()
+    hc._tick()
+    assert hc._grabs, "still inside the hold window"
+    time.sleep(0.05)
+    hc._tick()
+    assert not hc._grabs
+    assert hc.cursors["Right"].pinching is False
+    assert len(scene.image_items()) == 1
+
+
+def test_hand_vanishing_over_the_bin_does_not_delete(rig):
+    """A lost detection is not a drop -- the hold window exists to prevent this."""
+    scene, view, item, hc = rig
+    hc.tuning = hc.tuning.replace(lost_hold_ms=20.0)
+    vp = view.viewport().rect()
+    bin_center = view.trash_rect().center()
+    over = (bin_center.x() / vp.width(), bin_center.y() / vp.height())
+    other = canvas_xy(view, QPointF(0, 0))
+
+    # Right grabs the image and carries it onto the bin; Left is merely present.
+    hc.latest = frame(("Right", *other, True), ("Left", *other, False))
+    hc._tick()
+    assert "Right" in hc._grabs
+    settle(hc, frame(("Right", *over, True), ("Left", *other, False)))
+    assert view.trash_armed is True
+
+    # Right leaves the frame while parked on the bin; Left stays visible.
+    hc.latest = frame(("Left", *other, False))
+    hc._tick()
+    time.sleep(0.05)
+    hc._tick()
+    assert "Right" not in hc._grabs
+    assert len(scene.image_items()) == 1, "a hand that vanished must not delete"
+    assert view.trash_armed is False
