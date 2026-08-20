@@ -1,4 +1,4 @@
-"""Pinch detection and per-hand state. Pure: landmarks in, Hand states out.
+"""Grab detection and per-hand state. Pure: landmarks in, Hand states out.
 
 No camera, no Qt, no MediaPipe imports -- everything here is driven by plain
 sequences of landmarks so it can be tested with synthetic input.
@@ -13,6 +13,12 @@ projection is normalized per axis over a 4:3 frame, which quietly makes a
 vertical gap count 1.33x a horizontal one. The metric 3D world landmarks have
 neither problem, because distance in metres is invariant to rotation and metric
 space is isotropic, so every pinch decision here reads those.
+
+Closing the whole hand is the second spelling of the same grab (#34), and it is
+decided the same way and in the same space -- a fist held toward the lens is the
+worst case of that projection, every fingertip collapsing onto the knuckle it is
+measured against. There is one latch, not two: the two measurements are two ways
+of reading one gesture, so either can take it and either can hold it.
 """
 
 from __future__ import annotations
@@ -28,6 +34,13 @@ THUMB_TIP = 4
 INDEX_TIP = 8
 WRIST = 0
 MIDDLE_MCP = 9
+
+# Index, middle, ring and pinky, each tip paired with its own knuckle. The thumb
+# is left out on purpose: it folds across the fingers rather than into the palm,
+# so it says little about whether the hand is closed, and the pinch already
+# reads it.
+FINGER_TIPS = (8, 12, 16, 20)
+FINGER_MCPS = (5, 9, 13, 17)
 
 Landmarks = list[tuple[float, float]]
 Landmarks3D = list[tuple[float, float, float]]
@@ -62,6 +75,27 @@ def pinch_ratio(world: Landmarks3D) -> float:
     return math.dist(world[THUMB_TIP], world[INDEX_TIP]) / palm
 
 
+def fist_ratio(world: Landmarks3D) -> float:
+    """How far the four fingertips sit from their own knuckles, over palm length.
+
+        ratio = mean(|tip_i - mcp_i|) / |wrist - middle_mcp|
+
+    Each finger measured against its own knuckle, not against the wrist: on real
+    landmarks the wrist estimate wanders when the forearm is hidden, and the two
+    fists it was checked against read 0.90 and 1.30 from the wrist while reading
+    0.358 and 0.359 from the knuckles -- the same hand shape, one number.
+
+    Metric for the same reason the pinch is (#32), and more so: a fist pointed
+    at the lens foreshortens every one of these four distances at once.
+    """
+    palm = math.dist(world[WRIST], world[MIDDLE_MCP])
+    if palm <= 1e-6:
+        return 999.0
+    reach = sum(math.dist(world[t], world[m])
+                for t, m in zip(FINGER_TIPS, FINGER_MCPS))
+    return reach / (len(FINGER_TIPS) * palm)
+
+
 def hand_scale(landmarks: Landmarks) -> float:
     """Projected palm length: it shrinks with distance, so it proxies depth.
 
@@ -92,8 +126,34 @@ def map_to_canvas(xy: tuple[float, float], tuning: Tuning) -> tuple[float, float
     return min(1.0, max(0.0, u)), min(1.0, max(0.0, v))
 
 
+def grab_state(held: bool, ratio: float, curl: float,
+               tuning: Tuning) -> tuple[bool, str]:
+    """One latch, two Schmitt triggers: is the hand closed, and by which spelling.
+
+    Either measurement can take the grab (below its close threshold) and either
+    can keep it (below its open threshold), which is what makes a fist a synonym
+    for a pinch rather than a second verb. The latch is shared because the
+    handover between them is real: a completed fist measures 0.29-0.42 on the
+    pinch ratio -- above pinch_open -- so the pinch lets go part-way into a fist
+    that the fist test has not taken yet. Latching each half separately would
+    drop the image in that gap and grab it again a few frames later.
+
+    Returns the latch and a label for it. The label is for the tuning panel and
+    the overlay to show; nothing downstream may branch on it.
+    """
+    by_pinch = ratio <= tuning.pinch_open
+    by_fist = curl <= tuning.fist_open
+    if held:
+        held = by_pinch or by_fist
+    else:
+        held = ratio < tuning.pinch_close or curl < tuning.fist_close
+    if not held:
+        return False, ""
+    return True, "both" if by_pinch and by_fist else "pinch" if by_pinch else "fist"
+
+
 class HandFilterState:
-    """Per-hand smoothing + latched pinch state.
+    """Per-hand smoothing + latched grab state.
 
     Keyed by handedness label by the engine, never by list index: indices swap
     between frames when hands cross or one drops out, which makes grabbed
@@ -154,24 +214,26 @@ class GestureEngine:
                 state = self._states[det.handedness] = HandFilterState(tuning)
 
             ratio = pinch_ratio(det.world)
+            curl = fist_ratio(det.world)
             smooth_xy = state.point(pinch_point(det.landmarks), t)
             smooth_scale = state.scale(hand_scale(det.landmarks), t)
 
-            # Schmitt trigger. A single threshold flickers around the boundary
+            # Schmitt triggers. A single threshold flickers around the boundary
             # and makes you drop images constantly.
-            if state.pinching:
-                state.pinching = ratio <= tuning.pinch_open
-            else:
-                state.pinching = ratio < tuning.pinch_close
+            state.pinching, grip = grab_state(state.pinching, ratio, curl, tuning)
 
             hands.append(Hand(
                 handedness=det.handedness,
+                # A fist aims with the same point a pinch does, so the cursor
+                # does not jump when one tightens into the other.
                 pinch_xy=map_to_canvas(smooth_xy, tuning),
                 raw_xy=smooth_xy,
                 pinch_ratio=ratio,
                 pinching=state.pinching,
                 hand_scale=smooth_scale,
                 group_delay_ms=state.point.group_delay * 1000.0,
+                fist_ratio=curl,
+                grip=grip,
                 landmarks=list(det.landmarks) if include_landmarks else None,
             ))
 

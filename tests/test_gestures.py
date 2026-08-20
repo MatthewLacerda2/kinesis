@@ -1,10 +1,8 @@
-"""Synthetic landmark sequences in, state transitions out.
+"""Synthetic landmark sequences in, pinch state transitions out.
 
-The hands here are built in metres and then projected through a pinhole camera,
-because that is the order the real pipeline works in and it is the only way the
-orientation tests can mean anything: a fixture that made up the 2D and the 3D
-landmarks independently could be made to agree with whatever it was asked to
-prove.
+The hand itself lives in `tests/handmodel.py`: metres first, projected second,
+so the orientation tests mean something. The fist half of the same latch is
+tested next door in `test_fist.py`.
 """
 
 import math
@@ -12,7 +10,6 @@ import math
 import pytest
 
 from kinesis.tracking.gestures import (
-    Detection,
     GestureEngine,
     hand_scale,
     map_to_canvas,
@@ -20,73 +17,13 @@ from kinesis.tracking.gestures import (
     pinch_ratio,
 )
 from kinesis.tracking.protocol import Tuning
-
-PALM_M = 0.095        # wrist -> middle MCP, measured off a real detected hand
-PINCHED_M = 0.014     # fingertips together: 0.147 of the palm
-OPEN_M = 0.050        # fingertips apart: 0.53 of the palm
-FRAME_W, FRAME_H = 640, 480                            # 4:3, as the camera runs
-FOCAL = (FRAME_W / 2) / math.tan(math.radians(30))     # ~60 deg horizontal FOV
-DEPTH = 0.50          # metres from the lens
+from tests.handmodel import OPEN_M, PINCHED_M, det, feed, world_hand
 
 
-def world_hand(gap: float, tilt: float = 0.0, roll: float = 0.0):
-    """21 metric landmarks: `gap` metres between the fingertips.
-
-    `tilt` turns the hand toward the lens, so the palm axis foreshortens under
-    projection while the fingertip gap does not -- the geometry of #32. `roll`
-    turns the pinch axis within the palm plane, from across the palm at 0 to
-    along it at 90, which is what the per-axis 2D normalization treats unevenly.
-    Only the four points the maths reads are placed; the rest sit mid-palm.
-    """
-    a, r = math.radians(tilt), math.radians(roll)
-    up = (0.0, -math.cos(a), -math.sin(a))             # wrist -> fingers
-    axis = (math.cos(r),                                # thumb tip -> index tip
-            math.sin(r) * up[1],
-            math.sin(r) * up[2])
-    mmcp = tuple(PALM_M * c for c in up)
-    mid = tuple(1.5 * PALM_M * c for c in up)           # fingertips, past the MCPs
-    pts = [tuple(c / 2 for c in mmcp)] * 21
-    pts[0] = (0.0, 0.0, 0.0)
-    pts[9] = mmcp
-    pts[4] = tuple(m - c * gap / 2 for m, c in zip(mid, axis))
-    pts[8] = tuple(m + c * gap / 2 for m, c in zip(mid, axis))
-    return pts
-
-
-def project(world, at=None, depth: float = DEPTH):
-    """Pinhole-project metres to normalized frame coords, per axis over 4:3.
-
-    Dividing x by 640 and y by 480 is what MediaPipe hands back, and is where
-    the 1.33x anisotropy in the old projected ratio came from.
-    """
-    pts = [((FOCAL * x / (z + depth) + FRAME_W / 2) / FRAME_W,
-            (FOCAL * y / (z + depth) + FRAME_H / 2) / FRAME_H) for x, y, z in world]
-    if at is None:
-        return pts
-    mid = pinch_point(pts)
-    return [(x + at[0] - mid[0], y + at[1] - mid[1]) for x, y in pts]
-
-
-def det(gap: float = OPEN_M, tilt: float = 0.0, roll: float = 0.0,
-        at=(0.5, 0.4), depth: float = DEPTH, label: str = "Right") -> Detection:
-    world = world_hand(gap, tilt, roll)
-    return Detection(label, project(world, at, depth), world)
-
-
-def projected_ratio(detection: Detection) -> float:
+def projected_ratio(detection) -> float:
     """The old formula, on the 2D landmarks -- kept to show the defect is real."""
     lm = detection.landmarks
     return math.dist(lm[4], lm[8]) / math.dist(lm[0], lm[9])
-
-
-def feed(engine, gaps, dt=1 / 30, start=0.0, **kw):
-    """Run a sequence of gaps through the engine, returning each Hand."""
-    out, t = [], start
-    for gap in gaps:
-        hands = engine.update([det(gap, **kw)], t)
-        out.append(hands[0] if hands else None)
-        t += dt
-    return out
 
 
 # ---------- ratio maths ----------
