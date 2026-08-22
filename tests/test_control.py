@@ -1,86 +1,22 @@
-"""The command surface an agent drives with nobody watching.
+"""The envelope, and the commands about images.
 
 Every reply here is something an MCP client reports back as fact, so a handler
 that returns the wrong shape, or dies on a request missing a key, becomes an
 agent confidently describing a board that isn't there. The dispatch layer is
 exercised directly against a real BoardScene: same handlers, same replies, no
-port bound and nothing for a network stack to make flaky.
+port bound and nothing for a network stack to make flaky. The harness is in
+tests/boardcontrol.py.
+
+The commands about a *kind* are tested with that kind -- the box commands in
+test_boxes.py, the group commands in test_groups.py -- because what they have to
+get right is the kind's own rules, not the envelope's.
 """
 
 import base64
-import json
 
 import pytest
-from PySide6.QtCore import QObject
 
-from kinesis.canvas.scene import BoardScene
-from kinesis.canvas.view import BoardView
-from kinesis.control import ControlServer
-
-TOKEN = "test-token"
-
-
-class FakeStatusBar:
-    def __init__(self):
-        self.messages = []
-
-    def showMessage(self, text, _timeout=0):
-        self.messages.append(text)
-
-
-class FakeCameraBackground:
-    active = False
-
-
-class FakeWindow:
-    """Everything the handlers reach for on the window, and nothing else.
-
-    The scene and the view are real -- they are what the commands are actually
-    about. The camera and the status bar are not: one needs hardware and the
-    other needs a window, and neither decides whether a command is correct.
-    """
-
-    def __init__(self):
-        self.board = BoardScene()
-        self.view = BoardView(self.board)
-        self.view.resize(800, 600)
-        self.camera_bg = FakeCameraBackground()
-        self._status = FakeStatusBar()
-
-    def statusBar(self):
-        return self._status
-
-    def set_background(self, enabled: bool) -> bool:
-        self.camera_bg.active = enabled
-        return self.camera_bg.active
-
-    def toggle_background(self) -> bool:
-        return self.set_background(not self.camera_bg.active)
-
-
-class OfflineControl(ControlServer):
-    """The real dispatcher and the real handlers, minus the listening socket."""
-
-    def __init__(self, window):
-        QObject.__init__(self)
-        self.window = window
-        self.board = window.board
-        self.token = TOKEN
-
-
-@pytest.fixture
-def control(qapp):
-    return OfflineControl(FakeWindow())
-
-
-def send(control, cmd=None, token=TOKEN, **fields):
-    request = dict(fields)
-    if cmd is not None:
-        request["cmd"] = cmd
-    if token is not None:
-        request["token"] = token
-    return control._dispatch(json.dumps(request))
-
+from .boardcontrol import send
 
 # ---------- the envelope ----------
 
@@ -213,137 +149,6 @@ def test_list_items_reports_the_size_qt_actually_drew(control, make_image):
 
 def test_list_items_on_an_empty_board(control):
     assert send(control, "list_items") == {"items": [], "ok": True}
-
-
-# ---------- groups ----------
-
-def _two(control, make_image):
-    return [send(control, "add_image", path=str(make_image(f"{n}.png")))["id"]
-            for n in range(2)]
-
-
-def test_set_parent_anchors_and_the_listing_shows_it(control, make_image):
-    parent, child = _two(control, make_image)
-    reply = send(control, "set_parent", parent=parent, ids=[child])
-    assert reply["anchored"] == [child] and reply["refused"] == []
-
-    listed = {i["id"]: i for i in send(control, "list_items")["items"]}
-    assert listed[child]["parent"] == parent
-    assert listed[parent]["parent"] is None
-    assert listed[child]["group_color"] == listed[parent]["group_color"] is not None
-
-
-def test_an_anchored_item_moves_when_its_parent_does(control, make_image):
-    parent, child = _two(control, make_image)
-    send(control, "set_parent", parent=parent, ids=[child])
-    before = {i["id"]: (i["x"], i["y"]) for i in send(control, "list_items")["items"]}
-    control.board.find(parent).moveBy(100, 40)
-    after = {i["id"]: (i["x"], i["y"]) for i in send(control, "list_items")["items"]}
-    assert after[child] == pytest.approx((before[child][0] + 100, before[child][1] + 40))
-
-
-def test_set_parent_refuses_an_id_it_cannot_use_rather_than_dropping_it(control, make_image):
-    parent, child = _two(control, make_image)
-    reply = send(control, "set_parent", parent=parent, ids=[child, "no-such-id", parent])
-    assert reply["anchored"] == [child]
-    assert reply["refused"] == ["no-such-id", parent], "a loop or a bad id passed silently"
-
-
-def test_unparent_sets_an_item_loose(control, make_image):
-    parent, child = _two(control, make_image)
-    send(control, "set_parent", parent=parent, ids=[child])
-    assert send(control, "unparent", ids=[child])["freed"] == [child]
-    listed = {i["id"]: i for i in send(control, "list_items")["items"]}
-    assert listed[child]["parent"] is None
-    assert listed[child]["group_color"] is None
-
-
-def test_removing_a_parent_takes_its_children_with_it(control, make_image):
-    parent, child = _two(control, make_image)
-    send(control, "set_parent", parent=parent, ids=[child])
-    assert send(control, "remove_image", id=parent)["removed"] is True
-    assert send(control, "list_items")["items"] == []
-
-
-# ---------- descriptions ----------
-
-def test_a_new_image_is_listed_as_having_no_description(control, make_image):
-    """The signal the whole feature rests on: empty means nobody has looked.
-
-    A caller decides what to spend a vision pass on by reading this field, so an
-    image that arrived by drag-drop must come back empty rather than helpfully
-    pre-filled with its file name.
-    """
-    send(control, "add_image", path=str(make_image("kettle.png")))
-    assert send(control, "list_images")["images"][0]["description"] == ""
-
-
-def test_a_description_is_written_and_read_back(control, make_image):
-    item_id = send(control, "add_image", path=str(make_image()))["id"]
-    reply = send(control, "describe_image", id=item_id, description="a copper kettle")
-    assert reply == {"described": True, "id": item_id,
-                     "description": "a copper kettle", "ok": True}
-    assert send(control, "list_images")["images"][0]["description"] == "a copper kettle"
-
-
-def test_a_description_can_be_overwritten_and_cleared(control, make_image):
-    """A wrong reading must never be stuck on an image nobody can reach."""
-    item_id = send(control, "add_image", path=str(make_image()))["id"]
-    send(control, "describe_image", id=item_id, description="a teapot")
-    send(control, "describe_image", id=item_id, description="a kettle")
-    assert send(control, "list_images")["images"][0]["description"] == "a kettle"
-    assert send(control, "describe_image", id=item_id, description="")["description"] == ""
-    assert send(control, "list_images")["images"][0]["description"] == ""
-
-
-def test_describing_an_id_that_is_not_there_says_so(control):
-    assert send(control, "describe_image", id="nope", description="x") == {
-        "described": False, "ok": True}
-
-
-def test_find_images_matches_a_description_and_names_the_field(control, make_image):
-    described = send(control, "add_image", path=str(make_image("a.png")))["id"]
-    send(control, "add_image", path=str(make_image("b.png")))
-    send(control, "describe_image", id=described, description="A copper kettle, steaming")
-
-    matches = send(control, "find_images", query="KETTLE")["matches"]
-    assert [m["id"] for m in matches] == [described], "case-insensitive, and only the hit"
-    assert matches[0]["matched"] == "description"
-
-
-def test_find_images_tells_a_read_image_apart_from_a_lucky_file_name(control, make_image):
-    """Both can match; a caller has to know which kind of answer it got.
-
-    A file-name hit is a guess about an image nobody has looked at. Reporting it
-    as if it were a description would put the filename back in the one field
-    that exists to not contain one -- and description hits sort first, so acting
-    on the first result acts on the image something actually read.
-    """
-    guessed = send(control, "add_image", path=str(make_image("kettle-photo.png")))["id"]
-    read = send(control, "add_image", path=str(make_image("img_204.png")))["id"]
-    send(control, "describe_image", id=read, description="a kettle on a stove")
-
-    matches = send(control, "find_images", query="kettle")["matches"]
-    assert [(m["id"], m["matched"]) for m in matches] == [
-        (read, "description"), (guessed, "path")]
-    assert matches[1]["description"] == "", "a path hit is still an undescribed image"
-
-
-def test_find_images_never_treats_an_empty_description_as_a_wildcard(control, make_image):
-    """Undescribed is a state, not a match-everything.
-
-    Clearing a description has to put the image back exactly where an untouched
-    one is, or "described as nothing" quietly becomes a third state that matches
-    every query there is.
-    """
-    item_id = send(control, "add_image", path=str(make_image("img_9.png")))["id"]
-    send(control, "describe_image", id=item_id, description="a kettle")
-    send(control, "describe_image", id=item_id, description="   ")
-
-    assert send(control, "find_images", query="kettle")["matches"] == []
-    assert send(control, "find_images", query="")["matches"] == []
-    assert send(control, "find_images", query="   ")["matches"] == []
-    assert send(control, "list_images")["images"][0]["description"] == ""
 
 
 def test_fit_frames_the_content(control, make_image):

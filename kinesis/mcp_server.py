@@ -26,7 +26,9 @@ server = MCPServer(
         "background between the webcam feed and the plain dark board. "
         "list_items reports every item on the board with its position and size "
         "in the board's own units, which is how to place something relative to "
-        "what is already there without screenshotting to aim by. Images "
+        "what is already there without screenshotting to aim by, and add_box "
+        "draws a rectangle or an ellipse around whatever those numbers say. "
+        "Images "
         "can also be described -- look at one, record what it shows with "
         "describe_image, and it stays findable by meaning from then on, in this "
         "session and every later one. The kinesis app must already be open."
@@ -195,6 +197,99 @@ def find_images(query: str) -> str:
     for item in matches:
         lines.append(f"{_describe_line(item)}   [matched on {item['matched']}]")
     return "\n".join(lines)
+
+
+@server.tool()
+def add_box(width: float, height: float, x: float = 0.0, y: float = 0.0,
+            geometry: str = "rect", fill: str | None = None,
+            stroke: str | None = "#ff8a65", stroke_width: float = 4.0,
+            radius: float = 0.0) -> str:
+    """Draw a rectangle or an ellipse on the board.
+
+    A box is what you draw around a group of references to say *these go
+    together*, and around a detail to say *look here*. It is geometry rather
+    than an imported picture, so it stays crisp however far the board is zoomed
+    in, and it is an ordinary board item once it exists: grabbed by hand, moved,
+    scaled, binned and saved like anything else.
+
+    This call is the only way one is ever made -- there is no tool for it on the
+    canvas and no gesture for it.
+
+    width, height: the size in scene units. These are the units list_items
+    reports, so read the images you mean to enclose out of that listing and size
+    the box from their positions -- no screenshot needed to aim.
+    x, y: where the box's centre goes, in scene units.
+    geometry: "rect" or "ellipse".
+    radius: rounds a rectangle's corners, as a fraction of the box's own shorter
+    side -- 0 is square, 0.5 is a pill, and it means the same at any size.
+    fill: interior colour, "#rrggbb" or "#aarrggbb". Pass an alpha form like
+    "#40ff8a65" for a wash that does not hide the images underneath, or leave it
+    out entirely for a box that is nothing but an outline.
+    stroke: border colour, same format. Pass null for no border.
+    stroke_width: border thickness in scene units -- content, so it grows as the
+    board is zoomed in, the way a drawn line does.
+
+    A box with neither a fill nor a border is refused, because it would look
+    exactly like a box that failed to draw.
+
+    Two behaviours worth knowing before choosing a fill. A filled box is placed
+    **behind** everything, so its interior cannot cover what it is drawn around,
+    and it can be grabbed anywhere on it. An unfilled box is placed **in front**,
+    and can only be grabbed by its border -- its empty middle falls through to
+    the images inside, so drawing one round three images does not stop anybody
+    picking those images up.
+    """
+    reply = _call("add_box", width=width, height=height, x=x, y=y,
+                  geometry=geometry, fill=fill, stroke=stroke,
+                  stroke_width=stroke_width, radius=radius)
+    return f"Drew a {geometry} (id {reply['id']})."
+
+
+@server.tool()
+def set_box_style(box_id: str, fill: str | None = None, stroke: str | None = None,
+                  stroke_width: float | None = None, radius: float | None = None,
+                  geometry: str | None = None) -> str:
+    """Restyle a box that is already on the board.
+
+    Only the arguments you pass are changed; the rest are left alone. To take a
+    colour away entirely rather than change it, pass the string "none".
+
+    box_id: the box's id, from list_items.
+    fill: interior colour, "#rrggbb" or "#aarrggbb", or "none".
+    stroke: border colour, same format, or "none".
+    stroke_width: border thickness in scene units.
+    radius: corner rounding, a fraction of the shorter side, 0 to 0.5.
+    geometry: "rect" or "ellipse".
+
+    A change that would leave the box with neither a fill nor a border is
+    refused and nothing is applied.
+    """
+    payload = {}
+    for key, value in (("fill", fill), ("stroke", stroke)):
+        if value is not None:
+            payload[key] = None if value.lower() == "none" else value
+    for key, value in (("stroke_width", stroke_width), ("radius", radius),
+                       ("geometry", geometry)):
+        if value is not None:
+            payload[key] = value
+    if not payload:
+        return "Nothing to change: no style arguments were given."
+    styled = _call("set_box_style", id=box_id, **payload)["styled"]
+    return f"Restyled {box_id}." if styled else f"No box with id {box_id}"
+
+
+@server.tool()
+def remove_item(item_id: str) -> str:
+    """Remove any item from the board, whatever kind it is.
+
+    item_id: the id shown by list_items. Anything anchored under that item goes
+    with it, so removing a parent removes its whole set.
+
+    This is also how a box is unmade -- nothing on the canvas can delete one
+    except dropping it in the bin by hand.
+    """
+    removed = _call("remove_item", id=item_id)["removed"]
+    return f"Removed {item_id}" if removed else f"No item with id {item_id}"
 
 
 @server.tool()

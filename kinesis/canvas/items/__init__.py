@@ -11,6 +11,8 @@ reshuffles anyone else's imports.
 """
 
 from .base import BoardItem
+from .box import BoxItem, parse_color
 from .image import SUPPORTED_SUFFIXES, ImageItem, is_supported_image
 
-__all__ = ["SUPPORTED_SUFFIXES", "BoardItem", "ImageItem", "is_supported_image"]
+__all__ = ["SUPPORTED_SUFFIXES", "BoardItem", "BoxItem", "ImageItem",
+           "is_supported_image", "parse_color"]

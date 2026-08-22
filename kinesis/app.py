@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+from .canvas.items import ImageItem
 from .canvas.persistence import load_scene, save_scene
 from .canvas.scene import BoardScene
 from .canvas.view import BoardView
@@ -40,6 +41,7 @@ class MainWindow(QMainWindow):
 
         # Hand tracking starts OFF; the app is fully usable by mouse alone.
         self.tuning = load_tuning()
+        self.board.set_grab_band(self.tuning.box_grab_band)
         self.hands = HandControl(self.view, self.tuning, self)
         self.hands.status_changed.connect(self._on_tracker_status)
 
@@ -172,6 +174,7 @@ class MainWindow(QMainWindow):
 
     def _on_tuning_changed(self, tuning) -> None:
         self.tuning = tuning
+        self.board.set_grab_band(tuning.box_grab_band)
         self.hands.push_tuning(tuning)
 
     def _on_tracker_status(self, state: str, message: str) -> None:
@@ -283,12 +286,15 @@ class MainWindow(QMainWindow):
     def delete_selected(self) -> None:
         items = self.view.selected_items()
         for item in items:
-            self.board.remove_image(item)
+            self.board.remove_item(item)
         if items:
-            self.statusBar().showMessage(f"Deleted {len(items)} image(s)", 2000)
+            self.statusBar().showMessage(f"Deleted {len(items)} item(s)", 2000)
 
     def duplicate_selected(self) -> None:
-        clones = [c for c in (self.board.duplicate(i) for i in self.view.selected_items()) if c]
+        # Images only: duplicating a box is a call away over the control
+        # channel, which is the only surface that makes one in the first place.
+        clones = [c for c in (self.board.duplicate(i) for i in self.view.selected_items()
+                              if isinstance(i, ImageItem)) if c]
         if clones:
             self.board.clearSelection()
             for clone in clones:
@@ -309,10 +315,13 @@ class MainWindow(QMainWindow):
     # ---------- status ----------
 
     def _update_status(self) -> None:
-        total = len(self.board.image_items())
+        images = len(self.board.image_items())
+        others = len(self.board.board_items()) - images
         selected = len(self.view.selected_items())
         zoom = self.view.transform().m11() * 100
-        bits = [f"{total} image(s)"]
+        bits = [f"{images} image(s)"]
+        if others:
+            bits.append(f"{others} other item(s)")
         if selected:
             bits.append(f"{selected} selected")
         bits.append(f"zoom {zoom:.0f}%")

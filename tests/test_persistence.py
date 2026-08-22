@@ -150,20 +150,18 @@ def test_descriptions_survive_the_round_trip_and_absence_survives_it_too(populat
 def test_a_file_from_the_previous_format_version_is_refused_intact(populated, tmp_path):
     """The bump is only worth anything if the old file loses to it, loudly.
 
-    Version 3 records carry no parent link. Reading one anyway would produce a
-    board where nothing moves together -- which is indistinguishable from a
-    board where nothing was ever grouped, and so is exactly the silent misread
-    the version check exists to turn into a refusal. And the board that was
-    already open has to still be there afterwards, because a refusal that
-    cleared the canvas first would be worse than the misread it prevented.
+    Version 4 has no "boxes" list. Reading one anyway would produce a board
+    silently missing every box it was drawn with -- which looks exactly like a
+    board nobody ever drew on, and so is the quiet misread the version check
+    exists to turn into a refusal. And the board that was already open has to
+    still be there afterwards, because a refusal that cleared the canvas first
+    would be worse than the misread it prevented.
     """
     board, items = populated
     path = save_scene(board, tmp_path / "old.kinesis")
     stale = json.loads(path.read_text())
     stale["version"] = FORMAT_VERSION - 1
-    for record in stale["images"]:
-        record.pop("parent", None)
-        record.pop("group_index", None)
+    stale.pop("boxes", None)
     path.write_text(json.dumps(stale))
 
     before = snapshot(board)
@@ -269,3 +267,38 @@ def test_a_loaded_parent_does_not_drag_its_children_off_their_places(populated, 
     load_scene(fresh, path)
     after = {i.item_id: (i.pos().x(), i.pos().y()) for i in fresh.image_items()}
     assert after == before
+
+
+def test_boxes_come_back_as_they_were_drawn(populated, tmp_path):
+    from PySide6.QtGui import QColor
+
+    board, _items = populated
+    box = board.add_box(400, 250, pos=QPointF(70, -30), geometry="ellipse",
+                        fill=QColor("#40ff8a65"), stroke=QColor("#2a7fc8"),
+                        stroke_width=6.0, radius=0.25)
+    path = save_scene(board, tmp_path / "drawn.kinesis")
+
+    fresh = BoardScene()
+    load_scene(fresh, path)
+    back = fresh.find(box.item_id)
+    assert (back.width, back.height) == (400, 250)
+    assert back.geometry == "ellipse"
+    assert (back.fill, back.stroke) == (box.fill, box.stroke)
+    assert (back.stroke_width, back.radius) == (6.0, 0.25)
+    assert (back.pos().x(), back.pos().y()) == (70, -30)
+
+
+def test_a_boxs_place_in_the_stack_survives(populated, tmp_path):
+    """A filled box is drawn under the images it groups, and has to load that
+    way too -- coming back on top would hide the board it was drawn around."""
+    from PySide6.QtGui import QColor
+
+    board, items = populated
+    box = board.add_box(900, 700, fill=QColor("#40ff8a65"))
+    assert box.zValue() < min(i.zValue() for i in items)
+
+    path = save_scene(board, tmp_path / "stack.kinesis")
+    fresh = BoardScene()
+    load_scene(fresh, path)
+    back = fresh.find(box.item_id)
+    assert back.zValue() < min(i.zValue() for i in fresh.image_items())

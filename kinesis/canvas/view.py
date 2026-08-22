@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QGraphicsView
 
 from ..ui import buttons
 from .chrome import BoardChrome
-from .items import ImageItem, is_supported_image
+from .items import BoardItem, is_supported_image
 from .scene import BoardScene
 
 MIN_ZOOM, MAX_ZOOM = 0.02, 64.0
@@ -78,10 +78,14 @@ class BoardView(QGraphicsView):
 
     # ---------- selection geometry ----------
 
-    def selected_items(self) -> list[ImageItem]:
-        """Selected images. Selected non-image items are excluded on purpose:
-        every caller here (Alt+drag scale, delete, z-order) is an image op."""
-        return [i for i in self.board.selectedItems() if isinstance(i, ImageItem)]
+    def selected_items(self) -> list[BoardItem]:
+        """Selected board items, of any kind.
+
+        Every caller here -- Alt+drag scale, delete, z-order -- is something a
+        box wants as much as a picture does, and a kind that should not be
+        aimed at is one that never gets selected in the first place.
+        """
+        return [i for i in self.board.selectedItems() if isinstance(i, BoardItem)]
 
     def selection_rect(self) -> QRectF:
         rect = QRectF()
@@ -277,7 +281,7 @@ class BoardView(QGraphicsView):
     def delete_selection(self) -> int:
         items = self.selected_items()
         for item in items:
-            self.board.remove_image(item)
+            self.board.remove_item(item)
         return len(items)
 
     # ---------- Alt+drag scale (mouse equivalent of the two-hand pinch) ----------
@@ -286,7 +290,7 @@ class BoardView(QGraphicsView):
         items = self.selected_items()
         if not items:
             item = self.itemAt(pos)
-            if not isinstance(item, ImageItem):
+            if not isinstance(item, BoardItem):
                 return
             self.board.clearSelection()
             item.setSelected(True)

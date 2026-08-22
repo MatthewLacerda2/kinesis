@@ -45,6 +45,13 @@ class BoardItem(QGraphicsItem):
 
     kind = "item"
 
+    # Can a hand or a mouse pick this up? False for a kind whose whole position
+    # is decided by something else -- an arrow is where its two ends are (#53),
+    # so there is nothing for a drag to do and a thin diagonal line is the worst
+    # possible target for a hand cursor. Everything grabbable answers through
+    # shape(), so the mouse and the hand agree for free.
+    grabbable = True
+
     def __init__(self, item_id: str | None = None):
         super().__init__()
         self.item_id = item_id or uuid.uuid4().hex[:12]
