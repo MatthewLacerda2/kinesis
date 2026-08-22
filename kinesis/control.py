@@ -175,6 +175,44 @@ class ControlServer(QObject):
             "z": item.zValue(),
         }
 
+    @staticmethod
+    def _item_record(item) -> dict:
+        """One item of any kind as the wire sees it.
+
+        The rectangle is Qt's own -- sceneBoundingRect() is what actually placed
+        the pixels -- rather than a second calculation of it from scale times
+        natural size. Those agree today and would drift the first time a kind
+        has a transform this code did not think about, and "close enough" is not
+        a thing to aim an arrow with.
+        """
+        rect = item.sceneBoundingRect()
+        return {
+            "id": item.item_id,
+            "kind": item.kind,
+            "x": round(rect.center().x(), 1),
+            "y": round(rect.center().y(), 1),
+            "width": round(rect.width(), 1),
+            "height": round(rect.height(), 1),
+            "z": item.zValue(),
+        }
+
+    def cmd_list_items(self, _request: dict) -> dict:
+        """Everything on the board -- every kind, not only the images.
+
+        Takes no keys. Each item comes back with its id, its "kind", the scene
+        coordinates of its centre, and its width and height on the board.
+
+        Those are scene units: the same numbers cmd_add_image takes and a
+        .kinesis file stores, so a figure read out of here can be written
+        straight back in. This is how a caller aims -- putting something around
+        or beside what is already there -- without taking a screenshot first.
+
+        It is also the complete inventory of what cmd_clear_board would remove.
+        For the pictures specifically, with their descriptions, use
+        cmd_list_images.
+        """
+        return {"items": [self._item_record(item) for item in self.board.board_items()]}
+
     def cmd_list_images(self, _request: dict) -> dict:
         """The images on the board, with id, path, description, position and size.
 
@@ -182,9 +220,10 @@ class ControlServer(QObject):
         nothing here ever fills that field in for you, so empty means nobody has
         looked at the picture yet and it is the caller's cue to do so.
 
-        Today every board item is an image, so this is also the whole board. When
-        that stops being true this listing goes board-wide (issue #3): a caller
-        has to be able to see everything cmd_clear_board would remove.
+        The images and not the board: this is the listing to use when the next
+        thing you do is about pictures -- describing them, finding them, taking
+        one off. cmd_list_items is the board-wide one, and it is the one that
+        answers "what is on this board" and "what would cmd_clear_board remove".
         """
         return {"images": [self._record(item) for item in self.board.image_items()]}
 

@@ -186,6 +186,34 @@ def test_list_images_on_an_empty_board(control):
     assert send(control, "list_images") == {"images": [], "ok": True}
 
 
+# ---------- the board-wide listing ----------
+
+def test_list_items_reports_every_item_with_its_kind(control, make_image):
+    ids = [send(control, "add_image", path=str(make_image(f"{n}.png")))["id"]
+           for n in range(2)]
+    items = send(control, "list_items")["items"]
+    assert [i["id"] for i in items] == ids
+    assert {i["kind"] for i in items} == {"image"}
+    assert set(items[0]) == {"id", "kind", "x", "y", "width", "height", "z"}
+
+
+def test_list_items_reports_the_size_qt_actually_drew(control, make_image):
+    """Scene units, off Qt's own rectangle -- so a caller can aim with them.
+
+    The test image is 400x300 and the board normalises the long edge to 800, so
+    the answer has to be the size on the board and not the size in the file.
+    """
+    item_id = send(control, "add_image", path=str(make_image(w=400, h=300)))["id"]
+    item = next(i for i in send(control, "list_items")["items"] if i["id"] == item_id)
+    assert (item["width"], item["height"]) == pytest.approx((800.0, 600.0))
+    real = control.board.find(item_id).sceneBoundingRect()
+    assert (item["x"], item["y"]) == pytest.approx((real.center().x(), real.center().y()))
+
+
+def test_list_items_on_an_empty_board(control):
+    assert send(control, "list_items") == {"items": [], "ok": True}
+
+
 # ---------- descriptions ----------
 
 def test_a_new_image_is_listed_as_having_no_description(control, make_image):

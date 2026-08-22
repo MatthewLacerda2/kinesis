@@ -23,7 +23,10 @@ server = MCPServer(
     instructions=(
         "Controls a running kinesis reference board: add images to it, remove "
         "them, list what is on it, screenshot it, and switch the canvas "
-        "background between the webcam feed and the plain dark board. Images "
+        "background between the webcam feed and the plain dark board. "
+        "list_items reports every item on the board with its position and size "
+        "in the board's own units, which is how to place something relative to "
+        "what is already there without screenshotting to aim by. Images "
         "can also be described -- look at one, record what it shows with "
         "describe_image, and it stays findable by meaning from then on, in this "
         "session and every later one. The kinesis app must already be open."
@@ -103,6 +106,29 @@ def _describe_line(item: dict) -> str:
 
 
 @server.tool()
+def list_items() -> str:
+    """List everything on the board -- every kind of item, not only the images.
+
+    Each line is an item's id, its kind, where its centre is, and how big it is
+    on the board. Those numbers are scene units: exactly what add_image and a
+    saved board use, so a position read out of here can be handed straight back
+    to a call that places something. That is how to put a thing beside, around
+    or between what is already there without taking a screenshot to aim by.
+
+    This is the complete inventory of what clear_board would remove. Use
+    list_images instead when what you are about to do is about pictures -- it
+    carries the file names and the descriptions, which this listing does not.
+    """
+    items = _call("list_items")["items"]
+    if not items:
+        return "The board is empty."
+    lines = [f"{len(items)} item(s) on the board:"]
+    lines += [f"  {item['id']}  {item['kind']:<6} {item['width']}x{item['height']}"
+              f"  centred at ({item['x']}, {item['y']})" for item in items]
+    return "\n".join(lines)
+
+
+@server.tool()
 def list_images() -> str:
     """List the images on the board: ids, positions, and what each one is.
 
@@ -111,8 +137,8 @@ def list_images() -> str:
     shows -- nothing fills that in automatically, so it is a real gap and not a
     formatting quirk. Those are the images to look at and describe_image.
 
-    Every item a kinesis board can hold today is an image, so this is also a
-    complete inventory of what clear_board would remove.
+    This is the pictures, which is not necessarily the whole board: list_items
+    is the board-wide one, and the inventory of what clear_board would remove.
     """
     images = _call("list_images")["images"]
     if not images:
