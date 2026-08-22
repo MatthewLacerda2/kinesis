@@ -21,14 +21,15 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF
 
-from .items import BoxItem
+from .items import BoxItem, NoteItem
 from .scene import BoardScene
 
-# 5: boxes (#51) get their own list. A version 4 file simply has none, and a
-# board that silently loses every box it was drawn with is exactly the quiet
-# misread the version check turns into a refusal. (4 was: parent links and group
-# colours, #4. 3 was: one list per kind, #50. 2 was: descriptions, #9.)
-FORMAT_VERSION = 5
+# 6: notes (#52) get their own list, for the same reason boxes did -- a version
+# 5 file has none, and a board silently missing the words written on it is the
+# quiet misread the version check turns into a refusal. (5 was: boxes, #51. 4
+# was: parent links and group colours, #4. 3 was: one list per kind, #50. 2 was:
+# descriptions, #9.)
+FORMAT_VERSION = 6
 
 
 def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = False) -> Path:
@@ -62,7 +63,8 @@ def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = Fals
 
     data = {"format": "kinesis", "version": FORMAT_VERSION, "packed": pack,
             "images": images,
-            "boxes": [item.to_dict() for item in scene.box_items()]}
+            "boxes": [item.to_dict() for item in scene.box_items()],
+            "notes": [item.to_dict() for item in scene.note_items()]}
 
     if view is not None:
         center = view.mapToScene(view.viewport().rect().center())
@@ -121,14 +123,16 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
         placed.append((item, record))
         loaded += 1
 
-    for record in sorted(data.get("boxes", []), key=lambda r: r.get("z", 0)):
-        # Built bare and then filled in from the record: every field a box has
-        # is in apply_dict already, and going through add_box would re-decide
-        # the placement and the z-order the file is telling us.
-        box = scene.add_item(BoxItem(1.0, 1.0))
-        box.apply_dict(record)
-        placed.append((box, record))
-        loaded += 1
+    # Built bare and then filled in from the record: every field these kinds
+    # have is in apply_dict already, and going through add_box/add_note would
+    # re-decide the placement and the z-order the file is telling us.
+    for key, blank in (("boxes", lambda: BoxItem(1.0, 1.0)),
+                       ("notes", lambda: NoteItem("."))):
+        for record in sorted(data.get(key, []), key=lambda r: r.get("z", 0)):
+            item = scene.add_item(blank())
+            item.apply_dict(record)
+            placed.append((item, record))
+            loaded += 1
 
     # Parent links go on only once every item is where the file says it is: a
     # parent restored after one of its children would otherwise carry that child

@@ -26,9 +26,10 @@ server = MCPServer(
         "background between the webcam feed and the plain dark board. "
         "list_items reports every item on the board with its position and size "
         "in the board's own units, which is how to place something relative to "
-        "what is already there without screenshotting to aim by, and add_box "
-        "draws a rectangle or an ellipse around whatever those numbers say. "
-        "Images "
+        "what is already there without screenshotting to aim by; add_box draws "
+        "a rectangle or an ellipse around whatever those numbers say, and "
+        "add_note writes text the person at the board can read -- which is the "
+        "only way words ever get onto it. Images "
         "can also be described -- look at one, record what it shows with "
         "describe_image, and it stays findable by meaning from then on, in this "
         "session and every later one. The kinesis app must already be open."
@@ -181,21 +182,32 @@ def describe_image(image_id: str, description: str) -> str:
 
 @server.tool()
 def find_images(query: str) -> str:
-    """Find images on the board by what they show, rather than by id.
+    """Find things on the board by what they say, rather than by id.
 
     query: what to look for. Matched against the descriptions written by
-    describe_image and, for images nobody has described, against file names.
+    describe_image, against the text of every note, and -- for images nobody has
+    described -- against file names.
 
-    Each result says which of the two it matched on. A "description" hit is
-    something a client looked at and recorded; a "path" hit is only a file name
-    and may be nothing of the sort, so check it before acting on it.
+    Notes are searched too, and on purpose: asked for the lighting references,
+    the note that says "lighting" and the images sitting under it are the same
+    answer.
+
+    Each result says which of the three it matched on. A "description" hit is
+    something a client looked at and recorded and a "text" hit is words somebody
+    deliberately wrote, both worth acting on; a "path" hit is only a file name
+    and may be nothing of the sort, so check it before acting on it. File-name
+    hits come last.
     """
     matches = _call("find_images", query=query)["matches"]
     if not matches:
         return f"Nothing on the board matches {query!r}."
     lines = [f"{len(matches)} match(es) for {query!r}:"]
     for item in matches:
-        lines.append(f"{_describe_line(item)}   [matched on {item['matched']}]")
+        if item["kind"] == "image":
+            lines.append(f"{_describe_line(item)}   [matched on {item['matched']}]")
+        else:
+            lines.append(f"  {item['id']}  {item['kind']}  {item.get('text', '')!r}"
+                         f"   [matched on {item['matched']}]")
     return "\n".join(lines)
 
 
@@ -276,6 +288,74 @@ def set_box_style(box_id: str, fill: str | None = None, stroke: str | None = Non
         return "Nothing to change: no style arguments were given."
     styled = _call("set_box_style", id=box_id, **payload)["styled"]
     return f"Restyled {box_id}." if styled else f"No box with id {box_id}"
+
+
+@server.tool()
+def add_note(text: str, x: float = 0.0, y: float = 0.0, wrap_width: float = 600.0,
+             size: float = 48.0, weight: int = 400, family: str | None = None,
+             color: str | None = None) -> str:
+    """Write text on the board, where the person at it can read it.
+
+    This is the opposite and the complement of describe_image: a description is
+    for whoever is driving the board and is never shown to anybody; a note is
+    words the *person* sees. Labelling a set -- "lighting", "the version he
+    approved", "do not use" -- is the difference between a board somebody comes
+    back to and a board they rebuild.
+
+    There is no caret and no on-canvas editing, so this call and set_note_text
+    are the only way any words ever get onto this board.
+
+    text: what it says. A note with nothing in it is refused.
+    x, y: where the block's centre goes, in scene units -- the units list_items
+    reports, so a caption is placed under a set by reading that set's numbers.
+    wrap_width: the width the text wraps at, in scene units. The block grows
+    downward from there. A note is a label, not a document: it never shrinks to
+    fit and never scrolls.
+    size: text size in scene units, the same units as wrap_width. For scale: a
+    new image is 800 units on its long edge.
+    weight: 100 (thin) to 900 (black); 400 is regular, 700 is bold. It is a
+    number rather than a bold flag, because a flag would be a coarser way to say
+    a number that already exists.
+    family: font family. Left out, it is the machine's own UI font, which is the
+    only font this board ships. A family the machine does not have is refused
+    rather than substituted -- nobody is watching this call, so a wrong face
+    would be a board that is wrong with nothing saying so.
+    color: "#rrggbb" or "#aarrggbb". Defaults to a light grey that reads on the
+    dark board.
+
+    Once it exists a note is an ordinary board item: grabbed by hand, moved,
+    scaled, binned and saved like anything else. To put a label *inside* a box,
+    make the note and then set_parent it to the box -- it will move with the box
+    and keep its own size.
+    """
+    reply = _call("add_note", text=text, x=x, y=y, wrap_width=wrap_width,
+                  size=size, weight=weight, family=family, color=color)
+    return f"Wrote a note (id {reply['id']}): {text}"
+
+
+@server.tool()
+def set_note_text(note_id: str, text: str | None = None, size: float | None = None,
+                  weight: int | None = None, family: str | None = None,
+                  color: str | None = None, wrap_width: float | None = None) -> str:
+    """Change what a note says, or how it is set.
+
+    Only the arguments you pass are changed. This is the only way a note's text
+    ever changes -- there is no caret on the board.
+
+    note_id: the note's id, from list_items.
+    text: the new text. Leaving a note with none is refused.
+    size, weight, family, color, wrap_width: as in add_note.
+    """
+    payload = {}
+    for key, value in (("text", text), ("size", size), ("weight", weight),
+                       ("family", family), ("color", color),
+                       ("wrap_width", wrap_width)):
+        if value is not None:
+            payload[key] = value
+    if not payload:
+        return "Nothing to change: no arguments were given."
+    styled = _call("set_note_text", id=note_id, **payload)["styled"]
+    return f"Updated {note_id}." if styled else f"No note with id {note_id}"
 
 
 @server.tool()

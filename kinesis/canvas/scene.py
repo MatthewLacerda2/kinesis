@@ -16,7 +16,14 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QGraphicsScene
 
 from . import groups
-from .items import BoardItem, BoxItem, ImageItem, is_supported_image
+from .items import (
+    BoardItem,
+    BoxItem,
+    ImageItem,
+    NoteItem,
+    is_supported_image,
+    known_family,
+)
 
 BACKGROUND = QColor(32, 33, 36)
 
@@ -74,6 +81,10 @@ class BoardScene(QGraphicsScene):
     def box_items(self) -> list[BoxItem]:
         """The boxes on the board, in z-order (bottom first)."""
         return [i for i in self.board_items() if isinstance(i, BoxItem)]
+
+    def note_items(self) -> list[NoteItem]:
+        """The notes on the board, in z-order (bottom first)."""
+        return [i for i in self.board_items() if isinstance(i, NoteItem)]
 
     def image_items(self) -> list[ImageItem]:
         """The images on the board, in z-order (bottom first).
@@ -234,6 +245,49 @@ class BoardScene(QGraphicsScene):
         self.board_changed.emit()
         return box
 
+    def add_note(self, text: str, pos: QPointF | None = None, family: str | None = None,
+                 size: float = 48.0, weight: int = 400, color=None,
+                 wrap_width: float = 600.0) -> NoteItem:
+        """Write a note on the board. Refuses one with nothing in it.
+
+        A font family is refused when the machine does not have it, rather than
+        substituted. That refusal belongs on this path and not on the human one:
+        kinesis draws immediately, in front of somebody looking at it, so a
+        wrong face is visible the instant it happens -- but a note written over
+        MCP has nobody watching, and a silent substitution there is a board that
+        is wrong with nothing anywhere saying so.
+        """
+        if not text.strip():
+            raise ValueError("a note needs some text -- it was given none")
+        if family and not known_family(family):
+            raise ValueError(f"this machine has no font called {family!r}")
+        note = NoteItem(text, family, size, weight, color, wrap_width)
+        self.addItem(note)
+        note.setPos(pos if pos is not None else QPointF(0, 0))
+        self.bring_to_front(note)
+        self.board_changed.emit()
+        return note
+
+    def style_note(self, item: NoteItem | str, **changes) -> NoteItem | None:
+        """Change a note's text or how it is set. None when no note has that id.
+
+        Emptying the text is refused for the same reason add_note refuses it: a
+        note with nothing in it is indistinguishable from one that failed to
+        draw, and it leaves an invisible thing on the board that still catches
+        grabs.
+        """
+        target = self.find(item) if isinstance(item, str) else item
+        if not isinstance(target, NoteItem):
+            return None
+        if "text" in changes and not str(changes["text"]).strip():
+            raise ValueError("a note cannot be left with no text")
+        family = changes.get("family")
+        if family and not known_family(family):
+            raise ValueError(f"this machine has no font called {family!r}")
+        target.restyle(**changes)
+        self.board_changed.emit()
+        return target
+
     def style_box(self, item: BoxItem | str, **changes) -> BoxItem | None:
         """Restyle a box. Returns None when no box on the board has that id.
 
@@ -299,17 +353,22 @@ class BoardScene(QGraphicsScene):
         self.board_changed.emit()
         return target
 
-    def search(self, query: str) -> list[tuple[ImageItem, str]]:
-        """Images matching `query`, each with the field it matched on.
+    def search(self, query: str) -> list[tuple[BoardItem, str]]:
+        """Board items matching `query`, each with the field it matched on.
 
-        In z-order like every other listing, and description hits come out ahead
-        of file-name hits: a caller acting on the first result should get the
-        image something actually read, not the one whose file happens to be
+        Board-wide, not image-wide: asked for the lighting references, a caller
+        should find the note that says "lighting" as well as the images sitting
+        under it (#52). A kind with no words in it never matches.
+
+        In z-order like every other listing, except that hits on words somebody
+        deliberately wrote -- a description, a note's own text -- come out ahead
+        of bare file-name hits. A caller acting on the first result should get
+        the thing something actually read, not the one whose file happens to be
         named after it.
         """
-        hits = [(item, field) for item in self.image_items()
+        hits = [(item, field) for item in self.board_items()
                 if (field := item.matches(query)) is not None]
-        return sorted(hits, key=lambda hit: hit[1] != "description")
+        return sorted(hits, key=lambda hit: hit[1] == "path")
 
     def clear_board(self) -> int:
         """Empty the board -- every item, not just the images. Returns how many."""
