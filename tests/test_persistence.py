@@ -150,9 +150,9 @@ def test_descriptions_survive_the_round_trip_and_absence_survives_it_too(populat
 def test_a_file_from_the_previous_format_version_is_refused_intact(populated, tmp_path):
     """The bump is only worth anything if the old file loses to it, loudly.
 
-    Version 4 has no "boxes" list. Reading one anyway would produce a board
-    silently missing every box it was drawn with -- which looks exactly like a
-    board nobody ever drew on, and so is the quiet misread the version check
+    Version 5 has no "notes" list. Reading one anyway would produce a board
+    silently missing every word written on it -- which looks exactly like a
+    board nobody ever labelled, and so is the quiet misread the version check
     exists to turn into a refusal. And the board that was already open has to
     still be there afterwards, because a refusal that cleared the canvas first
     would be worse than the misread it prevented.
@@ -161,7 +161,7 @@ def test_a_file_from_the_previous_format_version_is_refused_intact(populated, tm
     path = save_scene(board, tmp_path / "old.kinesis")
     stale = json.loads(path.read_text())
     stale["version"] = FORMAT_VERSION - 1
-    stale.pop("boxes", None)
+    stale.pop("notes", None)
     path.write_text(json.dumps(stale))
 
     before = snapshot(board)
@@ -302,3 +302,38 @@ def test_a_boxs_place_in_the_stack_survives(populated, tmp_path):
     load_scene(fresh, path)
     back = fresh.find(box.item_id)
     assert back.zValue() < min(i.zValue() for i in fresh.image_items())
+
+
+def test_notes_come_back_word_for_word(populated, tmp_path):
+    from PySide6.QtGui import QColor
+
+    board, _items = populated
+    note = board.add_note("the version he actually approved", pos=QPointF(-40, 260),
+                          size=64, weight=700, wrap_width=420,
+                          color=QColor("#ffd54f"))
+    path = save_scene(board, tmp_path / "labelled.kinesis")
+
+    fresh = BoardScene()
+    load_scene(fresh, path)
+    back = fresh.find(note.item_id)
+    assert back.text == "the version he actually approved"
+    assert (back.size, back.weight, back.wrap_width) == (64, 700, 420)
+    assert back.color == note.color
+    assert back.boundingRect() == note.boundingRect(), "the block was laid out differently"
+
+
+def test_a_note_parented_to_a_box_comes_back_still_parented(populated, tmp_path):
+    from PySide6.QtGui import QColor
+
+    board, _items = populated
+    box = board.add_box(500, 300, fill=QColor("#40ff8a65"))
+    note = board.add_note("lighting", pos=QPointF(0, 180))
+    board.set_parent(note, box)
+
+    path = save_scene(board, tmp_path / "node.kinesis")
+    fresh = BoardScene()
+    load_scene(fresh, path)
+    back_note, back_box = fresh.find(note.item_id), fresh.find(box.item_id)
+    assert back_note.parent_id == back_box.item_id
+    back_box.setPos(back_box.pos().x() + 100, back_box.pos().y())
+    assert back_note.pos().x() == note.pos().x() + 100

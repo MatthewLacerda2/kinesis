@@ -19,7 +19,7 @@ from PySide6.QtCore import QBuffer, QObject, QPointF, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtNetwork import QHostAddress, QTcpServer
 
-from .canvas.items import parse_color
+from .canvas.items import ImageItem, NoteItem, parse_color
 
 CONTROL_PATH = Path.home() / ".config" / "kinesis" / "control.json"
 
@@ -245,6 +245,74 @@ class ControlServer(QObject):
         box = self.board.style_box(request["id"], **changes)
         return {"styled": box is not None}
 
+    def cmd_add_note(self, request: dict) -> dict:
+        """Write text on the board, where the person at it can read it.
+
+        This is the complement of cmd_describe_image: a description is for
+        whoever is driving the board and is never shown, a note is for the
+        person looking at it.
+
+        text: what it says. A note with no text in it is refused.
+        x, y: where the block's centre goes, in scene units. Defaults to the
+        origin.
+        wrap_width: the width the text wraps at, in scene units. The block grows
+        downward from there -- a note is a label, so it never shrinks to fit and
+        never scrolls.
+        size: the text size in scene units, the same units as wrap_width.
+        weight: 100 (thin) to 900 (black), 400 being regular. A number, not a
+        bold flag -- a flag would be a coarser way to say a number that exists.
+        family: the font family. Left out, it is the machine's UI font. A family
+        this machine does not have is refused rather than quietly substituted:
+        nobody is watching when this call comes in, so a wrong face would be a
+        board that is wrong with nothing anywhere saying so.
+        color: "#rrggbb" or "#aarrggbb". Defaults to a light grey that reads on
+        the dark board.
+
+        Answers with the new note's id. Once it exists it is an ordinary board
+        item: grabbed by hand, moved, scaled, binned and saved. Only its text is
+        MCP-shaped -- there is no caret and no on-canvas editing, so
+        cmd_set_note_text is the only way it ever changes.
+        """
+        note = self.board.add_note(
+            text=request["text"],
+            pos=QPointF(float(request.get("x", 0.0)), float(request.get("y", 0.0))),
+            family=request.get("family"),
+            size=float(request.get("size", 48.0)),
+            weight=int(request.get("weight", 400)),
+            color=_color(request.get("color"), "color"),
+            wrap_width=float(request.get("wrap_width", 600.0)),
+        )
+        self.window.statusBar().showMessage("MCP wrote a note", 3000)
+        return {"id": note.item_id}
+
+    def cmd_set_note_text(self, request: dict) -> dict:
+        """Change what a note says, or how it is set.
+
+        id: the note's item id, from cmd_list_items.
+        text: the new text. Leaving a note with none is refused.
+        size, weight, family, color, wrap_width: as in cmd_add_note. Only the
+        keys you send are changed.
+
+        Answers with "styled": false if no note on the board has that id.
+        """
+        changes = {}
+        if "text" in request:
+            changes["text"] = str(request["text"])
+        if "size" in request:
+            changes["size"] = max(1.0, float(request["size"]))
+        if "weight" in request:
+            changes["weight"] = int(request["weight"])
+        if "family" in request:
+            changes["family"] = request["family"]
+        if "wrap_width" in request:
+            changes["wrap_width"] = max(1.0, float(request["wrap_width"]))
+        if "color" in request:
+            colour = _color(request["color"], "color")
+            if colour is not None:
+                changes["color"] = colour
+        note = self.board.style_note(request["id"], **changes)
+        return {"styled": note is not None}
+
     def cmd_remove_item(self, request: dict) -> dict:
         """Take any item off the board, whatever kind it is.
 
@@ -383,18 +451,33 @@ class ControlServer(QObject):
         return {"described": True, "id": item.item_id, "description": item.description}
 
     def cmd_find_images(self, request: dict) -> dict:
-        """Find images by what they are rather than by id.
+        """Find things on the board by what they say rather than by id.
 
-        query: text matched case-insensitively against each image's description
-        and, for images nothing has described, against its file name.
+        query: text matched case-insensitively against each image's description,
+        against the text of every note, and -- for images nothing has described
+        -- against the file name.
 
-        Answers with the cmd_list_images fields plus "matched", which is
-        "description" for an image somebody read and recorded, or "path" for a
-        bare file-name hit on an image nobody has looked at -- worth far less,
-        and never worth confusing for the first. Description hits come first.
+        Answers with the cmd_list_items fields plus "matched", plus the
+        cmd_list_images fields for anything that is an image. "matched" is
+        "description" for an image somebody read and recorded, "text" for a note
+        (which is words somebody deliberately wrote, and worth as much), or
+        "path" for a bare file-name hit on an image nobody has looked at --
+        worth far less, and never worth confusing for the first. File-name hits
+        come last.
+
+        Notes are in here on purpose: asked for the lighting references, the
+        note that says "lighting" and the images sitting under it are the same
+        answer.
         """
-        return {"matches": [dict(self._record(item), matched=field)
-                            for item, field in self.board.search(request["query"])]}
+        matches = []
+        for item, field in self.board.search(request["query"]):
+            record = self._item_record(item)
+            if isinstance(item, ImageItem):
+                record |= self._record(item)
+            elif isinstance(item, NoteItem):
+                record["text"] = item.text
+            matches.append(record | {"matched": field})
+        return {"matches": matches}
 
     def cmd_fit(self, _request: dict) -> dict:
         """Zoom the board out until everything on it is visible at once.

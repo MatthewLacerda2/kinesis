@@ -117,6 +117,14 @@ class BoardItem(QGraphicsItem):
         return [i for i in scene.items()
                 if isinstance(i, BoardItem) and i.parent_id == self.item_id]
 
+    # ---------- search ----------
+
+    def matches(self, query: str) -> str | None:
+        """Which field a search hit, or None. Kinds with no words in them say
+        None, so a board-wide search asks every item and hears from the ones
+        that have something to say."""
+        return None
+
     # ---------- persistence ----------
 
     def to_dict(self) -> dict:

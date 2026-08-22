@@ -13,6 +13,7 @@ reshuffles anyone else's imports.
 from .base import BoardItem
 from .box import BoxItem, parse_color
 from .image import SUPPORTED_SUFFIXES, ImageItem, is_supported_image
+from .note import NoteItem, known_family, system_family
 
-__all__ = ["SUPPORTED_SUFFIXES", "BoardItem", "BoxItem", "ImageItem",
-           "is_supported_image", "parse_color"]
+__all__ = ["SUPPORTED_SUFFIXES", "BoardItem", "BoxItem", "ImageItem", "NoteItem",
+           "is_supported_image", "known_family", "parse_color", "system_family"]
