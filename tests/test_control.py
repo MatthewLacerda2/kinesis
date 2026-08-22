@@ -194,7 +194,8 @@ def test_list_items_reports_every_item_with_its_kind(control, make_image):
     items = send(control, "list_items")["items"]
     assert [i["id"] for i in items] == ids
     assert {i["kind"] for i in items} == {"image"}
-    assert set(items[0]) == {"id", "kind", "x", "y", "width", "height", "z"}
+    assert set(items[0]) == {"id", "kind", "x", "y", "width", "height", "z",
+                             "parent", "group_color"}
 
 
 def test_list_items_reports_the_size_qt_actually_drew(control, make_image):
@@ -212,6 +213,56 @@ def test_list_items_reports_the_size_qt_actually_drew(control, make_image):
 
 def test_list_items_on_an_empty_board(control):
     assert send(control, "list_items") == {"items": [], "ok": True}
+
+
+# ---------- groups ----------
+
+def _two(control, make_image):
+    return [send(control, "add_image", path=str(make_image(f"{n}.png")))["id"]
+            for n in range(2)]
+
+
+def test_set_parent_anchors_and_the_listing_shows_it(control, make_image):
+    parent, child = _two(control, make_image)
+    reply = send(control, "set_parent", parent=parent, ids=[child])
+    assert reply["anchored"] == [child] and reply["refused"] == []
+
+    listed = {i["id"]: i for i in send(control, "list_items")["items"]}
+    assert listed[child]["parent"] == parent
+    assert listed[parent]["parent"] is None
+    assert listed[child]["group_color"] == listed[parent]["group_color"] is not None
+
+
+def test_an_anchored_item_moves_when_its_parent_does(control, make_image):
+    parent, child = _two(control, make_image)
+    send(control, "set_parent", parent=parent, ids=[child])
+    before = {i["id"]: (i["x"], i["y"]) for i in send(control, "list_items")["items"]}
+    control.board.find(parent).moveBy(100, 40)
+    after = {i["id"]: (i["x"], i["y"]) for i in send(control, "list_items")["items"]}
+    assert after[child] == pytest.approx((before[child][0] + 100, before[child][1] + 40))
+
+
+def test_set_parent_refuses_an_id_it_cannot_use_rather_than_dropping_it(control, make_image):
+    parent, child = _two(control, make_image)
+    reply = send(control, "set_parent", parent=parent, ids=[child, "no-such-id", parent])
+    assert reply["anchored"] == [child]
+    assert reply["refused"] == ["no-such-id", parent], "a loop or a bad id passed silently"
+
+
+def test_unparent_sets_an_item_loose(control, make_image):
+    parent, child = _two(control, make_image)
+    send(control, "set_parent", parent=parent, ids=[child])
+    assert send(control, "unparent", ids=[child])["freed"] == [child]
+    listed = {i["id"]: i for i in send(control, "list_items")["items"]}
+    assert listed[child]["parent"] is None
+    assert listed[child]["group_color"] is None
+
+
+def test_removing_a_parent_takes_its_children_with_it(control, make_image):
+    parent, child = _two(control, make_image)
+    send(control, "set_parent", parent=parent, ids=[child])
+    assert send(control, "remove_image", id=parent)["removed"] is True
+    assert send(control, "list_items")["items"] == []
 
 
 # ---------- descriptions ----------

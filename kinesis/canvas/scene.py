@@ -15,6 +15,7 @@ from PySide6.QtCore import QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QGraphicsScene
 
+from . import groups
 from .items import BoardItem, ImageItem, is_supported_image
 
 BACKGROUND = QColor(32, 33, 36)
@@ -48,6 +49,10 @@ class BoardScene(QGraphicsScene):
                                  SCENE_EXTENT * 2, SCENE_EXTENT * 2))
         self.setBackgroundBrush(BACKGROUND)
         self._next_z = 1.0
+        # How far through the colour roster this board has got. Groups are
+        # coloured in the order they are made, so this is the board's count of
+        # them and is restored on load rather than recounted.
+        self._next_group = 0
 
     # ---------- queries ----------
 
@@ -91,6 +96,52 @@ class BoardScene(QGraphicsScene):
             rect = box if rect.isNull() else rect.united(box)
         return rect
 
+    # ---------- groups ----------
+
+    def set_parent(self, child: BoardItem | str, parent: BoardItem | str | None) -> bool:
+        """Anchor `child` to `parent`, or pass None to set it loose.
+
+        Returns False when either id names nothing, or when the link would close
+        a cycle (A parents B parents A) -- which is a hang rather than a strange
+        board, since the move propagation would recurse forever.
+
+        A parent that heads no group yet takes the next colour off the roster
+        here. Colours are handed out in a fixed order and never handed back: a
+        parent that loses its last child keeps its colour, because a roster that
+        renumbered itself as sets came and went would give a board a different
+        set of colours every session, which is the one thing the fixed order
+        exists to prevent.
+        """
+        target = self.find(child) if isinstance(child, str) else child
+        if target is None:
+            return False
+        if parent is None:
+            target.parent_id = None
+            self.board_changed.emit()
+            return True
+
+        anchor = self.find(parent) if isinstance(parent, str) else parent
+        if anchor is None or groups.would_cycle(self.board_items(), target, anchor):
+            return False
+        if anchor.group_index is None:
+            anchor.group_index = self._next_group
+            self._next_group += 1
+        target.parent_id = anchor.item_id
+        self.board_changed.emit()
+        return True
+
+    def children_of(self, item: BoardItem) -> list[BoardItem]:
+        return groups.children_of(self.board_items(), item)
+
+    def descendants_of(self, item: BoardItem) -> list[BoardItem]:
+        """Everything anchored under `item`, at any depth -- the set it moves,
+        and the set deleting it takes with it."""
+        return groups.descendants_of(self.board_items(), item)
+
+    def group_color(self, item: BoardItem):
+        """The colour `item` is outlined in, or None when it is in no group."""
+        return groups.color_of(self.board_items(), item)
+
     # ---------- mutation ----------
 
     def add_image(self, path: str | Path, pos: QPointF | None = None,
@@ -127,11 +178,17 @@ class BoardScene(QGraphicsScene):
         return item
 
     def remove_item(self, item: BoardItem | str) -> bool:
-        """Take any item off the board, by object or by id."""
+        """Take any item off the board, along with everything anchored under it.
+
+        The subtree goes because a group is a thing you moved as one and would
+        delete as one; leaving orphans behind pointing at an id that is gone is
+        a board that looks fine and is quietly broken. Decided 2026-08-18.
+        """
         target = self.find(item) if isinstance(item, str) else item
         if target is None:
             return False
-        self.removeItem(target)
+        for doomed in [*self.descendants_of(target), target]:
+            self.removeItem(doomed)
         self.board_changed.emit()
         return True
 
@@ -182,6 +239,7 @@ class BoardScene(QGraphicsScene):
         for item in items:
             self.removeItem(item)
         self._next_z = 1.0
+        self._next_group = 0
         self.board_changed.emit()
         return len(items)
 
@@ -190,6 +248,7 @@ class BoardScene(QGraphicsScene):
             return None  # pasted images have no path to re-read; skipped for now
         clone = ImageItem(item.source_path)
         clone.description = item.description  # same picture, so the same reading of it
+        clone.parent_id = item.parent_id      # a copy of a member of a set is in that set
         clone.setScale(item.scale())
         clone.setRotation(item.rotation())
         self.addItem(clone)

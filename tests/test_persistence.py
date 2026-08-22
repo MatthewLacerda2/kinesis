@@ -150,18 +150,20 @@ def test_descriptions_survive_the_round_trip_and_absence_survives_it_too(populat
 def test_a_file_from_the_previous_format_version_is_refused_intact(populated, tmp_path):
     """The bump is only worth anything if the old file loses to it, loudly.
 
-    Version 2 kept every item in one "items" list. Reading one anyway would find
-    no "images" key and load an empty board over the top of a real one -- a file
-    that opens successfully and shows nothing, which is exactly the silent
-    misread the version check exists to turn into a refusal. And the board that
-    was already open has to still be there afterwards, because a refusal that
+    Version 3 records carry no parent link. Reading one anyway would produce a
+    board where nothing moves together -- which is indistinguishable from a
+    board where nothing was ever grouped, and so is exactly the silent misread
+    the version check exists to turn into a refusal. And the board that was
+    already open has to still be there afterwards, because a refusal that
     cleared the canvas first would be worse than the misread it prevented.
     """
     board, items = populated
     path = save_scene(board, tmp_path / "old.kinesis")
     stale = json.loads(path.read_text())
     stale["version"] = FORMAT_VERSION - 1
-    stale["items"] = stale.pop("images")
+    for record in stale["images"]:
+        record.pop("parent", None)
+        record.pop("group_index", None)
     path.write_text(json.dumps(stale))
 
     before = snapshot(board)
@@ -221,3 +223,49 @@ def test_each_kind_gets_its_own_list_in_the_file(populated, tmp_path):
     assert "items" not in data, "a kind was smuggled into a shared list"
     assert len(data["images"]) == len(items)
     assert {record["kind"] for record in data["images"]} == {"image"}
+
+
+def test_a_group_survives_the_round_trip(populated, tmp_path):
+    """The link and the colour both, and the colour by its roster index -- the
+    order groups were made in is the durable fact, not the RGB."""
+    board, items = populated
+    parent, child = items[0], items[1]
+    board.set_parent(child, parent)
+    colour = board.group_color(parent)
+
+    path = save_scene(board, tmp_path / "grouped.kinesis")
+    fresh = BoardScene()
+    load_scene(fresh, path)
+
+    back_parent = fresh.find(parent.item_id)
+    back_child = fresh.find(child.item_id)
+    assert back_child.parent_id == back_parent.item_id
+    assert fresh.group_color(back_parent) == colour
+    assert fresh.group_color(back_child) == colour
+
+
+def test_the_next_group_made_after_a_load_gets_a_new_colour(populated, tmp_path):
+    board, items = populated
+    board.set_parent(items[1], items[0])
+    path = save_scene(board, tmp_path / "grouped.kinesis")
+
+    fresh = BoardScene()
+    load_scene(fresh, path)
+    first_group = fresh.find(items[0].item_id)
+    second_group = fresh.find(items[2].item_id)
+    fresh.set_parent(first_group, second_group)
+    assert fresh.group_color(second_group) != fresh.group_color(first_group)
+
+
+def test_a_loaded_parent_does_not_drag_its_children_off_their_places(populated, tmp_path):
+    """Every item's absolute position is in the file, so restoring a parent
+    after one of its children must not carry that child by the parent's move."""
+    board, items = populated
+    board.set_parent(items[0], items[-1])   # child has the *lowest* z, so it loads first
+    before = {i.item_id: (i.pos().x(), i.pos().y()) for i in items}
+
+    path = save_scene(board, tmp_path / "order.kinesis")
+    fresh = BoardScene()
+    load_scene(fresh, path)
+    after = {i.item_id: (i.pos().x(), i.pos().y()) for i in fresh.image_items()}
+    assert after == before

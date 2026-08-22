@@ -18,11 +18,9 @@ import numpy as np
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import (
     QBitmap,
-    QColor,
     QImage,
     QImageReader,
     QPainterPath,
-    QPen,
     QPixmap,
     QRegion,
     QTransform,
@@ -263,11 +261,6 @@ class ImageItem(BoardItem):
         painter.setRenderHint(painter.RenderHint.SmoothPixmapTransform, True)
         painter.drawPixmap(rect, pixmap, QRectF(pixmap.rect()))
 
-        if self.isSelected():
-            pen = QPen(QColor(120, 190, 255), 0)  # width 0 == cosmetic, 1px at any zoom
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(rect)
 
     # ---------- search ----------
 

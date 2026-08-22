@@ -33,7 +33,11 @@ from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 
 from ..ui import buttons, overlay
+from .items import BoardItem
 
+# What an item in no group is outlined in. An item in one takes its group's
+# colour instead (#4) -- which is the only way to look at a board and see that
+# three images move together, or which of them the others are anchored to.
 SELECT_COLOR = QColor(120, 190, 255)
 MARQUEE_FILL = QColor(120, 190, 255, 40)
 
@@ -118,17 +122,51 @@ class BoardChrome:
         painter.restore()
         return True
 
+    def draw_selection(self, painter: QPainter) -> None:
+        """Outline what is selected, and what would come with it.
+
+        Selection stays per-item -- clicking a child selects the child -- so the
+        outline is what says which *set* you are standing in: the selected item
+        solid, everything anchored under it dashed, all of it in the group's
+        colour. Without that a board gives no way at all to see that three
+        images move together, which is the whole reason the roster exists.
+        """
+        view = self.view
+        board = view.board
+        selected = [i for i in board.selectedItems() if isinstance(i, BoardItem)]
+        for item in selected:
+            colour = board.group_color(item) or SELECT_COLOR
+            self._outline(painter, item.sceneBoundingRect(), colour, carried=False)
+            for child in board.descendants_of(item):
+                self._outline(painter, child.sceneBoundingRect(), colour, carried=True)
+
+        sel = view.selection_rect()
+        if len(selected) > 1 and not sel.isNull():
+            # Only for a multi-selection: for one item it would trace the
+            # outline already drawn, in a second colour.
+            painter.setPen(QPen(SELECT_COLOR, 1, Qt.PenStyle.DotLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(self._viewport_rect(sel))
+
+    def _viewport_rect(self, scene_rect: QRectF) -> QRect:
+        return self.view.mapFromScene(scene_rect).boundingRect()
+
+    def _outline(self, painter: QPainter, scene_rect: QRectF,
+                 colour: QColor, carried: bool) -> None:
+        """One item's outline. `carried` is an item that moves with the
+        selection without being selected, and is drawn thinner and dashed so
+        the two never read as the same claim."""
+        painter.setPen(QPen(colour, 1 if carried else 2,
+                            Qt.PenStyle.DashLine if carried else Qt.PenStyle.SolidLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(self._viewport_rect(scene_rect))
+
     def draw_foreground(self, painter: QPainter) -> None:
         view = self.view
         painter.save()
         painter.resetTransform()  # draw in viewport px so overlays keep a fixed size
 
-        sel = view.selection_rect()
-        if not sel.isNull():
-            tl, br = view.mapFromScene(sel.topLeft()), view.mapFromScene(sel.bottomRight())
-            painter.setPen(QPen(SELECT_COLOR, 1, Qt.PenStyle.DashLine))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(QRect(tl, br))
+        self.draw_selection(painter)
 
         if view.marquee is not None:
             painter.setPen(QPen(SELECT_COLOR, 1, Qt.PenStyle.DashLine))

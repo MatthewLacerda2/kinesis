@@ -115,6 +115,10 @@ def list_items() -> str:
     to a call that places something. That is how to put a thing beside, around
     or between what is already there without taking a screenshot to aim by.
 
+    An entry that says "anchored to" is a child of that item: it moves when
+    that item moves, so moving the parent is how the whole set gets moved. The
+    group colour is what a person at the board sees the set outlined in.
+
     This is the complete inventory of what clear_board would remove. Use
     list_images instead when what you are about to do is about pictures -- it
     carries the file names and the descriptions, which this listing does not.
@@ -123,8 +127,11 @@ def list_items() -> str:
     if not items:
         return "The board is empty."
     lines = [f"{len(items)} item(s) on the board:"]
-    lines += [f"  {item['id']}  {item['kind']:<6} {item['width']}x{item['height']}"
-              f"  centred at ({item['x']}, {item['y']})" for item in items]
+    for item in items:
+        anchored = f"  anchored to {item['parent']}" if item["parent"] else ""
+        group = f"  group {item['group_color']}" if item["group_color"] else ""
+        lines.append(f"  {item['id']}  {item['kind']:<6} {item['width']}x{item['height']}"
+                     f"  centred at ({item['x']}, {item['y']}){anchored}{group}")
     return "\n".join(lines)
 
 
@@ -191,8 +198,52 @@ def find_images(query: str) -> str:
 
 
 @server.tool()
+def set_parent(parent_id: str, item_ids: list[str]) -> str:
+    """Anchor items to a parent item, so that moving the parent moves them all.
+
+    This is how a set is made: three angles of the same object, a row of colour
+    swatches. Children move with the parent and keep their own size -- they do
+    not scale with it, because resizing one image to compare it against another
+    is the thing a person does most on this board.
+
+    The parent takes the next colour off the board's fixed roster, and the whole
+    set is outlined in that colour whenever any of it is selected. That outline
+    is the only way somebody looking at the board can tell the set exists, so
+    grouping things that are not actually related makes the board harder to
+    read, not tidier.
+
+    parent_id: the item everything else is anchored to. It can itself be a child
+    of something -- nesting works to any depth.
+    item_ids: the items to anchor. A link that would close a loop is refused,
+    as is an id that names nothing on the board.
+
+    Deleting the parent later deletes everything anchored under it.
+    """
+    reply = _call("set_parent", parent=parent_id, ids=item_ids)
+    lines = [f"Anchored {len(reply['anchored'])} item(s) to {parent_id}."]
+    if reply["refused"]:
+        lines.append("Refused (unknown id, or the link would close a loop): "
+                     + ", ".join(reply["refused"]))
+    return "\n".join(lines)
+
+
+@server.tool()
+def unparent(item_ids: list[str]) -> str:
+    """Set items loose from whatever they are anchored to.
+
+    They stay exactly where they are and stop moving with their former parent.
+    Anything anchored to *them* stays anchored to them, so this detaches one
+    level rather than dissolving a whole set.
+
+    item_ids: the items to detach.
+    """
+    freed = _call("unparent", ids=item_ids)["freed"]
+    return f"Set {len(freed)} item(s) loose." if freed else "Nothing was detached."
+
+
+@server.tool()
 def remove_image(image_id: str) -> str:
-    """Remove one image from the board.
+    """Remove one image from the board, and anything anchored under it.
 
     image_id: the id shown by list_images.
     """
