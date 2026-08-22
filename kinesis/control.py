@@ -175,8 +175,7 @@ class ControlServer(QObject):
             "z": item.zValue(),
         }
 
-    @staticmethod
-    def _item_record(item) -> dict:
+    def _item_record(self, item) -> dict:
         """One item of any kind as the wire sees it.
 
         The rectangle is Qt's own -- sceneBoundingRect() is what actually placed
@@ -186,6 +185,7 @@ class ControlServer(QObject):
         a thing to aim an arrow with.
         """
         rect = item.sceneBoundingRect()
+        colour = self.board.group_color(item)
         return {
             "id": item.item_id,
             "kind": item.kind,
@@ -194,13 +194,52 @@ class ControlServer(QObject):
             "width": round(rect.width(), 1),
             "height": round(rect.height(), 1),
             "z": item.zValue(),
+            "parent": item.parent_id,
+            "group_color": colour.name() if colour is not None else None,
         }
+
+    def cmd_set_parent(self, request: dict) -> dict:
+        """Anchor items to a parent item, so they move when it moves.
+
+        parent: the id of the item to anchor them to.
+        ids: the ids of the items to anchor. Each one keeps its own size -- a
+        child moves with its parent and deliberately does not scale with it.
+
+        Nesting is allowed to any depth. A link that would close a loop (A under
+        B under A) is refused and comes back under "refused" rather than being
+        silently dropped, as does an id that names nothing.
+
+        The parent takes the next colour off the board's fixed roster, and every
+        item in the set is outlined in it once any of them is selected -- which
+        is the only way a person at the board can see that they move together.
+        """
+        parent = request.get("parent")
+        anchored, refused = [], []
+        for item_id in request.get("ids", []):
+            if self.board.set_parent(item_id, parent):
+                anchored.append(item_id)
+            else:
+                refused.append(item_id)
+        return {"anchored": anchored, "refused": refused, "parent": parent}
+
+    def cmd_unparent(self, request: dict) -> dict:
+        """Set items loose from whatever they are anchored to.
+
+        ids: the ids of the items to detach. They stay exactly where they are
+        and stop moving with their former parent. Anything anchored to *them*
+        stays anchored to them.
+        """
+        freed = [i for i in request.get("ids", []) if self.board.set_parent(i, None)]
+        return {"freed": freed}
 
     def cmd_list_items(self, _request: dict) -> dict:
         """Everything on the board -- every kind, not only the images.
 
         Takes no keys. Each item comes back with its id, its "kind", the scene
-        coordinates of its centre, and its width and height on the board.
+        coordinates of its centre, its width and height on the board, the id of
+        the item it is anchored to ("parent", null when it is anchored to
+        nothing) and the colour of the group it is in ("group_color", null when
+        it is in none).
 
         Those are scene units: the same numbers cmd_add_image takes and a
         .kinesis file stores, so a figure read out of here can be written

@@ -23,11 +23,11 @@ from PySide6.QtCore import QPointF
 
 from .scene import BoardScene
 
-# 3: one list per kind of item (#50). The images moved from "items" to "images",
-# so a version 2 file's board would load as an empty one -- which is precisely
-# the silent misreading the mandatory version bump exists to turn into a refusal.
-# (2 was: items carry a description, #9.)
-FORMAT_VERSION = 3
+# 4: items carry a parent link and a group colour (#4). A version 3 file has
+# neither, and reading one would produce a board where nothing moves together --
+# which looks exactly like a board where nothing was ever grouped. (3 was: one
+# list per kind, #50. 2 was: items carry a description, #9.)
+FORMAT_VERSION = 4
 
 
 def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = False) -> Path:
@@ -90,6 +90,7 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
 
     scene.clear_board()
     loaded, missing = 0, []
+    placed: list[tuple[object, dict]] = []
 
     for record in sorted(data.get("images", []), key=lambda r: r.get("z", 0)):
         src = record.get("path")
@@ -111,7 +112,18 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
             missing.append(str(src))
             continue
         item.apply_dict(record)
+        placed.append((item, record))
         loaded += 1
+
+    # Parent links go on only once every item is where the file says it is: a
+    # parent restored after one of its children would otherwise carry that child
+    # by the whole of its own move, and the board would load subtly scattered.
+    for item, record in placed:
+        item.apply_links(record)
+    # Past every group this board has made, so the next one gets a new colour
+    # rather than reusing the first.
+    scene._next_group = max((i.group_index + 1 for i in scene.board_items()
+                             if i.group_index is not None), default=0)
 
     # Above everything on the board, so the next added item stacks on top.
     scene._next_z = max((i.zValue() for i in scene.board_items()), default=1.0) + 1.0
