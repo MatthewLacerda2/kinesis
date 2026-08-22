@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QPointF, QTimer, Signal
 
-from ..canvas.items import ImageItem
+from ..canvas.items import BoardItem
 from ..tracking.protocol import HandFrame, SetTuning, Stop, TrackerStatus, Tuning
 from ..tracking.worker import start_tracker
 
@@ -57,7 +57,7 @@ class HandControl(QObject):
         self.fps = 0.0
 
         # label -> (item, offset from cursor to item origin, in scene coords)
-        self._grabs: dict[str, tuple[ImageItem, QPointF]] = {}
+        self._grabs: dict[str, tuple[BoardItem, QPointF]] = {}
 
         # Set while both hands pinch the same image; captured at the transition
         # frame so joining or leaving the second hand never jumps the image.
@@ -215,7 +215,7 @@ class HandControl(QObject):
         return self.view.mapToScene(int(cursor.x), int(cursor.y))
 
     @staticmethod
-    def _hits(item: ImageItem, scene_pos: QPointF) -> bool:
+    def _hits(item: BoardItem, scene_pos: QPointF) -> bool:
         return (item.sceneBoundingRect().contains(scene_pos)
                 and item.contains(item.mapFromScene(scene_pos)))
 
@@ -233,9 +233,12 @@ class HandControl(QObject):
                 return
 
         held = {item for item, _ in self._grabs.values()}
-        # Images only: a pinch moves and scales a picture. What a hand does to a
-        # non-image item is that item's question to answer, not this loop's.
-        for item in sorted(self.board.image_items(), key=lambda i: -i.zValue()):
+        # Every kind that says it can be grabbed, not images only: a box is an
+        # ordinary board item once it exists (#51). Whether a hand can aim at a
+        # kind at all is that kind's answer (BoardItem.grabbable), and where on
+        # it counts is its shape() -- so this loop never learns about kinds.
+        for item in sorted((i for i in self.board.board_items() if i.grabbable),
+                           key=lambda i: -i.zValue()):
             if item in held:
                 continue
             if self._hits(item, scene_pos):
@@ -273,7 +276,7 @@ class HandControl(QObject):
                     other.grabbing = False
             if self._two_hand and self._two_hand["item"] is item:
                 self._two_hand = None
-            self.board.remove_image(item)
+            self.board.remove_item(item)
             self.view.trash_armed = False
             cursor.grabbing = False
             cursor.pinching = False
@@ -309,7 +312,7 @@ class HandControl(QObject):
 
     # ---------- two-hand scale ----------
 
-    def _begin_two_hand(self, label_a: str, label_b: str, item: ImageItem) -> None:
+    def _begin_two_hand(self, label_a: str, label_b: str, item: BoardItem) -> None:
         ca, cb = self.cursors[label_a], self.cursors[label_b]
         pa, pb = self._scene_pos(ca), self._scene_pos(cb)
         mid = QPointF((pa.x() + pb.x()) / 2, (pa.y() + pb.y()) / 2)

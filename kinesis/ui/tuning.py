@@ -41,6 +41,7 @@ SLIDERS = [
     ("rect_y1", "Active rect  bottom", 0.51, 1.00, 0.01, 2),
     ("lerp_alpha", "UI lerp alpha  (1.0 = no extra lag)", 0.05, 1.00, 0.05, 2),
     ("lost_hold_ms", "Hold on lost hands (ms)", 0.0, 1000.0, 25.0, 0),
+    ("box_grab_band", "Box border grab width (scene units)", 4.0, 200.0, 2.0, 0),
 ]
 
 

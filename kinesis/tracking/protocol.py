@@ -99,6 +99,17 @@ class Tuning:
     rect_y0: float = 0.15
     rect_y1: float = 0.85
 
+    # How wide the grabbable band round an unfilled box's border is, in scene
+    # units, centred on the outline and independent of how thin the border is
+    # drawn (#51). A border is a thin thing to aim a hand at, and this is the
+    # number that decides whether aiming at one is a fair ask -- which makes it
+    # a grab number, and grab numbers are tried with hands rather than reasoned
+    # about. 40 is a twentieth of the 800-unit long edge a new image is
+    # normalised to: comfortably bigger than the cursor's own jitter, and small
+    # enough that the middle of a box round three images still falls through to
+    # the images.
+    box_grab_band: float = 40.0
+
     lerp_alpha: float = 0.9              # UI-side interpolation toward latest sample
     lost_hold_ms: float = 300.0          # keep a grab alive this long after hands vanish
 

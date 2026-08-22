@@ -21,13 +21,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF
 
+from .items import BoxItem
 from .scene import BoardScene
 
-# 4: items carry a parent link and a group colour (#4). A version 3 file has
-# neither, and reading one would produce a board where nothing moves together --
-# which looks exactly like a board where nothing was ever grouped. (3 was: one
-# list per kind, #50. 2 was: items carry a description, #9.)
-FORMAT_VERSION = 4
+# 5: boxes (#51) get their own list. A version 4 file simply has none, and a
+# board that silently loses every box it was drawn with is exactly the quiet
+# misread the version check turns into a refusal. (4 was: parent links and group
+# colours, #4. 3 was: one list per kind, #50. 2 was: descriptions, #9.)
+FORMAT_VERSION = 5
 
 
 def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = False) -> Path:
@@ -60,7 +61,8 @@ def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = Fals
         images.append(record)
 
     data = {"format": "kinesis", "version": FORMAT_VERSION, "packed": pack,
-            "images": images}
+            "images": images,
+            "boxes": [item.to_dict() for item in scene.box_items()]}
 
     if view is not None:
         center = view.mapToScene(view.viewport().rect().center())
@@ -71,7 +73,11 @@ def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = Fals
 
 
 def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, list[str]]:
-    """Replace the board with `path`'s contents. Returns (loaded, missing_paths)."""
+    """Replace the board with `path`'s contents. Returns (loaded, missing_paths).
+
+    "loaded" counts every item of every kind; "missing" is images whose file has
+    gone, which is the only way an item can fail to come back.
+    """
     path = Path(path).expanduser()
     data = json.loads(path.read_text())
     if data.get("format") != "kinesis":
@@ -113,6 +119,15 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
             continue
         item.apply_dict(record)
         placed.append((item, record))
+        loaded += 1
+
+    for record in sorted(data.get("boxes", []), key=lambda r: r.get("z", 0)):
+        # Built bare and then filled in from the record: every field a box has
+        # is in apply_dict already, and going through add_box would re-decide
+        # the placement and the z-order the file is telling us.
+        box = scene.add_item(BoxItem(1.0, 1.0))
+        box.apply_dict(record)
+        placed.append((box, record))
         loaded += 1
 
     # Parent links go on only once every item is where the file says it is: a

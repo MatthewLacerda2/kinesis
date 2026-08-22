@@ -15,13 +15,32 @@ import json
 import secrets
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QObject, QRectF, Qt
+from PySide6.QtCore import QBuffer, QObject, QPointF, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtNetwork import QHostAddress, QTcpServer
+
+from .canvas.items import parse_color
 
 CONTROL_PATH = Path.home() / ".config" / "kinesis" / "control.json"
 
 SHOT_MAX_EDGE = 1400
+
+
+def _color(value, field: str):
+    """A colour off the wire, or None for "no colour at all".
+
+    An unreadable string is an error naming the field rather than a None, which
+    matters because None is meaningful here: a caller who mistyped a colour and
+    got the "a box needs a fill or a border" refusal would go looking in exactly
+    the wrong place.
+    """
+    if value is None or value == "":
+        return None
+    colour = parse_color(value)
+    if colour is None:
+        raise ValueError(f"{field}: {value!r} is not a colour -- "
+                         "use '#rrggbb', or '#aarrggbb' for one with alpha")
+    return colour
 
 
 class ControlServer(QObject):
@@ -155,6 +174,86 @@ class ControlServer(QObject):
         """
         removed = self.board.remove_image(request["id"])
         return {"removed": removed}
+
+    def cmd_add_box(self, request: dict) -> dict:
+        """Draw a rectangle or an ellipse on the board.
+
+        width, height: the box's size in scene units -- the same units
+        cmd_list_items reports, so a box sized and placed from that listing lands
+        exactly where it was meant to.
+        x, y: where its centre goes, in scene units. Defaults to the origin.
+        geometry: "rect" (the default) or "ellipse".
+        radius: rounds a rectangle's corners. It is a fraction of the box's own
+        shorter side, from 0 (square) to 0.5 (a pill), so it means the same
+        thing whatever size the box is. Ignored by an ellipse.
+        fill: the interior colour, as "#rrggbb" or "#aarrggbb" -- use the alpha
+        form for a wash that does not hide what is underneath. null for no
+        interior at all, which is what a box drawn *round* things wants.
+        stroke: the border colour, same format. null for no border. Leaving it
+        out on a box that parents a group gives it the group's colour.
+        stroke_width: how thick the border is, in scene units. It is content,
+        not chrome: zoom in and it gets thicker, like a drawn line.
+
+        A box with neither a fill nor a border is refused: it would look exactly
+        like a box that failed to draw.
+
+        A filled box goes behind everything, since its interior would otherwise
+        hide what it is drawn around; an unfilled one goes in front, where its
+        border reads over whatever it encloses. An unfilled box is grabbed by
+        its border only -- the empty middle falls through to the images inside.
+        """
+        box = self.board.add_box(
+            width=float(request["width"]),
+            height=float(request["height"]),
+            pos=QPointF(float(request.get("x", 0.0)), float(request.get("y", 0.0))),
+            geometry=request.get("geometry", "rect"),
+            fill=_color(request.get("fill"), "fill"),
+            stroke=_color(request.get("stroke"), "stroke"),
+            stroke_width=float(request.get("stroke_width", 4.0)),
+            radius=float(request.get("radius", 0.0)),
+        )
+        self.window.statusBar().showMessage("MCP drew a box", 3000)
+        return {"id": box.item_id}
+
+    def cmd_set_box_style(self, request: dict) -> dict:
+        """Restyle a box that is already on the board.
+
+        id: the box's item id, from cmd_list_items.
+        fill, stroke: colours as "#rrggbb" or "#aarrggbb". Send the key with
+        null to take that colour away entirely; leave the key out to keep it.
+        stroke_width: border thickness in scene units.
+        radius: corner rounding, a fraction of the shorter side (0 to 0.5).
+        geometry: "rect" or "ellipse".
+
+        A change that would leave the box with neither a fill nor a border is
+        refused and nothing is applied -- half a style is how a box goes
+        invisible without anything saying so.
+
+        Answers with "styled": false if no box on the board has that id.
+        """
+        changes = {}
+        if "fill" in request:
+            changes["fill"] = _color(request["fill"], "fill")
+        if "stroke" in request:
+            changes["stroke"] = _color(request["stroke"], "stroke")
+        if "stroke_width" in request:
+            changes["stroke_width"] = max(0.0, float(request["stroke_width"]))
+        if "radius" in request:
+            changes["radius"] = min(0.5, max(0.0, float(request["radius"])))
+        if "geometry" in request:
+            changes["geometry"] = request["geometry"]
+        box = self.board.style_box(request["id"], **changes)
+        return {"styled": box is not None}
+
+    def cmd_remove_item(self, request: dict) -> dict:
+        """Take any item off the board, whatever kind it is.
+
+        id: the item id from cmd_list_items. Anything anchored under that item
+        goes with it, so removing a parent removes its whole set.
+
+        Answers with "removed": false if nothing on the board has that id.
+        """
+        return {"removed": self.board.remove_item(request["id"])}
 
     def cmd_clear_board(self, _request: dict) -> dict:
         """Empty the board: every item on it, not only the images."""

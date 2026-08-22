@@ -28,6 +28,17 @@ def qapp():
 
 
 @pytest.fixture
+def control(qapp):
+    """The control channel's real dispatcher over a real board, no socket bound.
+
+    A fixture rather than a helper because three modules drive it and each wants
+    a board of its own per test.
+    """
+    from .boardcontrol import FakeWindow, OfflineControl
+    return OfflineControl(FakeWindow())
+
+
+@pytest.fixture
 def make_image(tmp_path):
     """Write a solid-colour PNG and hand back its path.
 

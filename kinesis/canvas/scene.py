@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QGraphicsScene
 
 from . import groups
-from .items import BoardItem, ImageItem, is_supported_image
+from .items import BoardItem, BoxItem, ImageItem, is_supported_image
 
 BACKGROUND = QColor(32, 33, 36)
 
@@ -53,6 +53,10 @@ class BoardScene(QGraphicsScene):
         # coloured in the order they are made, so this is the board's count of
         # them and is restored on load rather than recounted.
         self._next_group = 0
+        # How wide a box's border is to aim a hand at, in scene units. Tuned
+        # live in the T panel, so it is pushed in rather than read from Tuning
+        # here -- the canvas does not import the tracker's protocol.
+        self.grab_band = 40.0
 
     # ---------- queries ----------
 
@@ -66,6 +70,10 @@ class BoardScene(QGraphicsScene):
         placement, select-all.
         """
         return sorted(self.items(), key=lambda i: i.zValue())
+
+    def box_items(self) -> list[BoxItem]:
+        """The boxes on the board, in z-order (bottom first)."""
+        return [i for i in self.board_items() if isinstance(i, BoxItem)]
 
     def image_items(self) -> list[ImageItem]:
         """The images on the board, in z-order (bottom first).
@@ -177,6 +185,76 @@ class BoardScene(QGraphicsScene):
         self.board_changed.emit()
         return item
 
+    def set_grab_band(self, width: float) -> None:
+        """Change how wide a box border is to aim at, and tell the boxes.
+
+        The band is part of every box's hit shape and bounding rect, so a change
+        that did not invalidate them would leave the boxes hit-testing against a
+        number nobody can see any more.
+        """
+        self.grab_band = max(0.0, float(width))
+        for item in self.board_items():
+            if isinstance(item, BoxItem):
+                item.refresh()
+
+    def add_item(self, item: BoardItem) -> BoardItem:
+        """Put an already-built item on the board, placing and styling nothing.
+
+        The load path: a file decides everything the placement and z-order rules
+        would otherwise decide, so applying them on top would move a board while
+        opening it.
+        """
+        self.addItem(item)
+        return item
+
+    def add_box(self, width: float, height: float, pos: QPointF | None = None,
+                geometry: str = "rect", fill=None, stroke=None,
+                stroke_width: float = 4.0, radius: float = 0.0) -> BoxItem:
+        """Put a box on the board. Refuses one that would draw nothing.
+
+        Neither a fill nor a border is required, but one of them is: a box drawn
+        with neither looks exactly like a box that failed to draw, and a board
+        quietly missing one is a mistake found much later.
+
+        Z-order is decided by the fill, because the fill is what can hide
+        things. A filled box goes behind everything -- it is the wash you put
+        under a set, and in front it would cover what it is drawn around. An
+        unfilled one goes in front, where its border reads over whatever it
+        encloses and its transparent middle obscures nothing.
+        """
+        box = BoxItem(width, height, geometry, fill, stroke, stroke_width, radius)
+        if box.draws_nothing():
+            raise ValueError("a box needs a fill, a border, or both -- it was given neither")
+        self.addItem(box)
+        box.setPos(pos if pos is not None else QPointF(0, 0))
+        if fill is None:
+            self.bring_to_front(box)
+        else:
+            self.send_to_back(box)
+        self.board_changed.emit()
+        return box
+
+    def style_box(self, item: BoxItem | str, **changes) -> BoxItem | None:
+        """Restyle a box. Returns None when no box on the board has that id.
+
+        The same refusal as add_box: a change that would leave the box with
+        neither a fill nor a border is rejected and nothing is applied, rather
+        than half-applied and invisible.
+        """
+        target = self.find(item) if isinstance(item, str) else item
+        if not isinstance(target, BoxItem):
+            return None
+        before = {name: getattr(target, name) for name in changes}
+        for name, value in changes.items():
+            setattr(target, name, value)
+        if target.draws_nothing():
+            for name, value in before.items():
+                setattr(target, name, value)
+            raise ValueError("that would leave the box with neither a fill nor a border")
+        target.refresh()
+        self.board_changed.emit()
+        return target
+
     def remove_item(self, item: BoardItem | str) -> bool:
         """Take any item off the board, along with everything anchored under it.
 
@@ -240,6 +318,10 @@ class BoardScene(QGraphicsScene):
             self.removeItem(item)
         self._next_z = 1.0
         self._next_group = 0
+        # How wide a box's border is to aim a hand at, in scene units. Tuned
+        # live in the T panel, so it is pushed in rather than read from Tuning
+        # here -- the canvas does not import the tracker's protocol.
+        self.grab_band = 40.0
         self.board_changed.emit()
         return len(items)
 
