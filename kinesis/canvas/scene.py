@@ -13,9 +13,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene
+from PySide6.QtWidgets import QGraphicsScene
 
-from .items import ImageItem, is_supported_image
+from .items import BoardItem, ImageItem, is_supported_image
 
 BACKGROUND = QColor(32, 33, 36)
 
@@ -34,9 +34,10 @@ class BoardScene(QGraphicsScene):
     """Holds the board's items and owns z-ordering and placement.
 
     Two accessors, deliberately distinct: board_items() is the whole board and
-    image_items() is the images on it. They return the same thing today, when an
-    image is the only kind of item there is, and the pen strokes and handles that
-    are coming are exactly why the call sites had to pick one on purpose.
+    image_items() is the images on it. Identity is board-wide -- find() answers
+    about any kind, because one id space is what makes an arrow able to name the
+    thing it is plugged into -- while the methods that only make sense on a
+    picture stay image-shaped and say so by refusing anything else.
     """
 
     board_changed = Signal()
@@ -50,7 +51,7 @@ class BoardScene(QGraphicsScene):
 
     # ---------- queries ----------
 
-    def board_items(self) -> list[QGraphicsItem]:
+    def board_items(self) -> list[BoardItem]:
         """Everything on the board, in z-order (bottom first).
 
         Every scene item is board content: chrome -- trash target, camera button,
@@ -70,10 +71,15 @@ class BoardScene(QGraphicsScene):
         """
         return [i for i in self.board_items() if isinstance(i, ImageItem)]
 
-    def find(self, item_id: str) -> ImageItem | None:
-        """Look up an image by its id. Only images carry an id today."""
-        for item in self.image_items():
-            if item.item_id == item_id:
+    def find(self, item_id: str) -> BoardItem | None:
+        """Look up any item by its id -- one id space across every kind.
+
+        Board-wide rather than image-wide because an arrow names its endpoints
+        by id (#53): a lookup that could only answer about pictures would make
+        an arrow attached to a box resolve to nothing, or worse, to a picture.
+        """
+        for item in self.board_items():
+            if isinstance(item, BoardItem) and item.item_id == item_id:
                 return item
         return None
 
@@ -120,13 +126,27 @@ class BoardScene(QGraphicsScene):
         self.board_changed.emit()
         return item
 
-    def remove_image(self, item: ImageItem | str) -> bool:
+    def remove_item(self, item: BoardItem | str) -> bool:
+        """Take any item off the board, by object or by id."""
         target = self.find(item) if isinstance(item, str) else item
         if target is None:
             return False
         self.removeItem(target)
         self.board_changed.emit()
         return True
+
+    def remove_image(self, item: ImageItem | str) -> bool:
+        """Take an image off the board. Refuses an id that names something else.
+
+        The image-shaped door onto remove_item, kept because the callers that
+        use it -- the bin, the delete key, the MCP image commands -- all mean a
+        picture, and "remove this image" answering true for a box would be a
+        caller finding out it deleted the wrong thing afterwards.
+        """
+        target = self.find(item) if isinstance(item, str) else item
+        if not isinstance(target, ImageItem):
+            return False
+        return self.remove_item(target)
 
     def describe_image(self, item: ImageItem | str, description: str) -> ImageItem | None:
         """Record what an image is. Returns None when no item has that id.
@@ -138,7 +158,7 @@ class BoardScene(QGraphicsScene):
         rather than being stuck on the image forever.
         """
         target = self.find(item) if isinstance(item, str) else item
-        if target is None:
+        if not isinstance(target, ImageItem):
             return None
         target.description = description.strip()
         self.board_changed.emit()
@@ -180,11 +200,11 @@ class BoardScene(QGraphicsScene):
 
     # ---------- z-order ----------
 
-    def bring_to_front(self, item: ImageItem) -> None:
+    def bring_to_front(self, item: BoardItem) -> None:
         self._next_z += 1.0
         item.setZValue(self._next_z)
 
-    def send_to_back(self, item: ImageItem) -> None:
+    def send_to_back(self, item: BoardItem) -> None:
         # Behind everything on the board, not merely behind the other images.
         lowest = min((i.zValue() for i in self.board_items()), default=0.0)
         item.setZValue(lowest - 1.0)

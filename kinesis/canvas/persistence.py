@@ -1,9 +1,16 @@
-"""Save/load .kinesis scene files (JSON: image paths + per-item transform).
+"""Save/load .kinesis scene files (JSON: one list per kind of board item).
 
-The file holds images and nothing else, so this module walks image_items() and
-not board_items() -- a non-image board item has no serialised form here, and a
-kind of item that gains one gains its own list in the format (and a version
-bump) rather than being smuggled into "items".
+**A kind gets its own list, never a shared "items" one.** A single list keyed by
+a `kind` field reads as the flexible choice and is the trap: every reader then
+branches on the kind before it knows what fields to expect, and the day two
+kinds disagree about what "size" means the file is ambiguous rather than wrong.
+Separate lists make the format say what it holds, and adding a kind is adding a
+key and a loader -- plus a version bump, since there are no migrations.
+
+What is *in* each record is the item's own business: this module calls
+to_dict()/apply_dict() on BoardItem and never reaches inside them. The one
+exception is the image path, which this module rewrites for packing, because
+where a file went is the saver's fact and not the item's.
 """
 
 from __future__ import annotations
@@ -16,11 +23,11 @@ from PySide6.QtCore import QPointF
 
 from .scene import BoardScene
 
-# 2: items carry a description (#9). A version 1 file has none, and there are no
-# migrations, so it is refused rather than loaded with the field quietly blank --
-# "no description" and "written before the field existed" would otherwise be the
-# same board, and the second one silently loses text somebody wrote.
-FORMAT_VERSION = 2
+# 3: one list per kind of item (#50). The images moved from "items" to "images",
+# so a version 2 file's board would load as an empty one -- which is precisely
+# the silent misreading the mandatory version bump exists to turn into a refusal.
+# (2 was: items carry a description, #9.)
+FORMAT_VERSION = 3
 
 
 def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = False) -> Path:
@@ -37,7 +44,7 @@ def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = Fals
     if pack:
         pack_dir.mkdir(parents=True, exist_ok=True)
 
-    items = []
+    images = []
     for item in scene.image_items():
         record = item.to_dict()
         src = record.get("path")
@@ -50,9 +57,10 @@ def save_scene(scene: BoardScene, path: str | Path, view=None, pack: bool = Fals
                 record["path"] = str(dest.relative_to(path.parent))
             else:
                 record["path"] = str(Path(src).resolve())
-        items.append(record)
+        images.append(record)
 
-    data = {"format": "kinesis", "version": FORMAT_VERSION, "packed": pack, "items": items}
+    data = {"format": "kinesis", "version": FORMAT_VERSION, "packed": pack,
+            "images": images}
 
     if view is not None:
         center = view.mapToScene(view.viewport().rect().center())
@@ -83,7 +91,7 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
     scene.clear_board()
     loaded, missing = 0, []
 
-    for record in sorted(data.get("items", []), key=lambda r: r.get("z", 0)):
+    for record in sorted(data.get("images", []), key=lambda r: r.get("z", 0)):
         src = record.get("path")
         if not src:
             continue
@@ -102,12 +110,7 @@ def load_scene(scene: BoardScene, path: str | Path, view=None) -> tuple[int, lis
         except (OSError, ValueError):
             missing.append(str(src))
             continue
-        item.setScale(record.get("scale", 1.0))
-        item.setRotation(record.get("rotation", 0.0))
-        item.setZValue(record.get("z", 0.0))
-        item.description = record.get("description") or ""
-        if record.get("id"):
-            item.item_id = record["id"]
+        item.apply_dict(record)
         loaded += 1
 
     # Above everything on the board, so the next added item stacks on top.

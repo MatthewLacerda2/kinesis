@@ -84,7 +84,7 @@ def test_a_packed_scene_survives_being_moved_away_from_its_images(populated, tmp
 def test_an_unpacked_scene_records_absolute_paths(populated, tmp_path):
     board, items = populated
     path = save_scene(board, tmp_path / "linked.kinesis")
-    stored = json.loads(path.read_text())["items"]
+    stored = json.loads(path.read_text())["images"]
     assert [record["path"] for record in stored] == [i.source_path for i in
                                                      sorted(items, key=lambda i: i.zValue())]
 
@@ -150,9 +150,10 @@ def test_descriptions_survive_the_round_trip_and_absence_survives_it_too(populat
 def test_a_file_from_the_previous_format_version_is_refused_intact(populated, tmp_path):
     """The bump is only worth anything if the old file loses to it, loudly.
 
-    Version 1 files have no description field. Reading one anyway would produce a
-    board that looks complete and is silently missing text somebody wrote, which
-    is precisely what the version check exists to prevent -- and the board that
+    Version 2 kept every item in one "items" list. Reading one anyway would find
+    no "images" key and load an empty board over the top of a real one -- a file
+    that opens successfully and shows nothing, which is exactly the silent
+    misread the version check exists to turn into a refusal. And the board that
     was already open has to still be there afterwards, because a refusal that
     cleared the canvas first would be worse than the misread it prevented.
     """
@@ -160,8 +161,7 @@ def test_a_file_from_the_previous_format_version_is_refused_intact(populated, tm
     path = save_scene(board, tmp_path / "old.kinesis")
     stale = json.loads(path.read_text())
     stale["version"] = FORMAT_VERSION - 1
-    for record in stale["items"]:
-        record.pop("description", None)
+    stale["items"] = stale.pop("images")
     path.write_text(json.dumps(stale))
 
     before = snapshot(board)
@@ -175,7 +175,7 @@ def test_a_file_from_another_format_version_is_refused(board, tmp_path, make_ima
     board.add_image(make_image())
     path = tmp_path / "future.kinesis"
     path.write_text(json.dumps({"format": "kinesis", "version": FORMAT_VERSION + 1,
-                                "packed": False, "items": []}))
+                                "packed": False, "images": []}))
     with pytest.raises(ValueError, match=str(FORMAT_VERSION + 1)):
         load_scene(board, path)
     assert len(board.image_items()) == 1, "a refused load must not empty the board"
@@ -183,7 +183,7 @@ def test_a_file_from_another_format_version_is_refused(board, tmp_path, make_ima
 
 def test_a_file_with_no_version_at_all_is_refused(board, tmp_path):
     path = tmp_path / "old.kinesis"
-    path.write_text(json.dumps({"format": "kinesis", "items": []}))
+    path.write_text(json.dumps({"format": "kinesis", "images": []}))
     with pytest.raises(ValueError):
         load_scene(board, path)
 
@@ -210,3 +210,14 @@ def test_the_viewport_comes_back_with_the_scene(populated, qapp, tmp_path):
     assert restored.transform().m11() == pytest.approx(2.0)
     center = restored.mapToScene(restored.viewport().rect().center())
     assert (center.x(), center.y()) == pytest.approx((120, -60), abs=2.0)
+
+
+def test_each_kind_gets_its_own_list_in_the_file(populated, tmp_path):
+    """The format says what it holds, rather than one list that has to be sorted
+    out by reading a field on every record (#50)."""
+    board, items = populated
+    path = save_scene(board, tmp_path / "board.kinesis")
+    data = json.loads(path.read_text())
+    assert "items" not in data, "a kind was smuggled into a shared list"
+    assert len(data["images"]) == len(items)
+    assert {record["kind"] for record in data["images"]} == {"image"}

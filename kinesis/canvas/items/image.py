@@ -1,16 +1,17 @@
-"""Board items. Currently just ImageItem, which owns the level-of-detail logic
-and its own hit-test shape.
+"""The image kind: level-of-detail, and a hit shape that follows the alpha.
 
 The shape lives here because it is a per-item fact, and putting it here fixes
 every entry point at once: the mouse (`view.itemAt`) and the pinch
 (`HandControl._hits`) both end up in `QGraphicsItem.contains`, which defers to
 `shape()`. A transparent PNG is a cut-out, so a pinch aimed through its hole has
 to reach whatever is behind it.
+
+Identity, z-order and the common half of the serialised form are `BoardItem`'s
+(base.py) and are not repeated here.
 """
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,8 @@ from PySide6.QtGui import (
     QTransform,
 )
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem
+
+from .base import BoardItem
 
 # Cap the working pixmap on the long edge; full res is loaded only past 1:1.
 PREVIEW_MAX_EDGE = 2048
@@ -96,7 +99,7 @@ def _region_from_mask(opaque: np.ndarray) -> QRegion | None:
     return QRegion(QBitmap.fromImage(solid))
 
 
-class ImageItem(QGraphicsItem):
+class ImageItem(BoardItem):
     """An image on the board.
 
     Geometry is centred on the item origin (boundingRect spans -w/2..+w/2) so
@@ -114,10 +117,11 @@ class ImageItem(QGraphicsItem):
     reading of the image, and telling those apart is the whole point of it.
     """
 
+    kind = "image"
+
     def __init__(self, path: str | None, image: QImage | None = None,
                  item_id: str | None = None):
-        super().__init__()
-        self.item_id = item_id or uuid.uuid4().hex[:12]
+        super().__init__(item_id)
         self.source_path = str(path) if path else None
         self.description = ""
 
@@ -291,13 +295,11 @@ class ImageItem(QGraphicsItem):
     # ---------- persistence ----------
 
     def to_dict(self) -> dict:
-        return {
-            "id": self.item_id,
+        return super().to_dict() | {
             "path": self.source_path,
             "description": self.description,
-            "x": self.pos().x(),
-            "y": self.pos().y(),
-            "scale": self.scale(),
-            "rotation": self.rotation(),
-            "z": self.zValue(),
         }
+
+    def apply_dict(self, record: dict) -> None:
+        super().apply_dict(record)
+        self.description = record.get("description") or ""
